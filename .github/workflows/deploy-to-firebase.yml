@@ -1,0 +1,22 @@
+name: Deploy Aetherium to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main # Or 'master', 'production', or whatever your main deployment branch is
+
+jobs:
+  deploy_to_firebase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Action to check out your repository code
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}' # Standard GitHub token for repo operations
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_AETHERIUM_C34F7 }}' # You'll set this up next!
+          projectId: 'aetherium-c34f7' # Your Firebase Project ID
+          channelId: live # Deploy to the 'live' channel (your default site)
+          entryPoint: 'public' # <--- This points to your 'public' folder
