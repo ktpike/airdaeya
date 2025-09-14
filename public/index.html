@@ -540,6 +540,32 @@ if (modalCloseBtn) {
                 resultContentEl.innerHTML = `<h2>Your Aetherium Character:</h2><div class="prose">${text}</div>`;
                 displayModal(text, 'success');
         
+                    // --- NEW CODE: Firestore Write Operations ---
+            // Ensure userId is available (checked at the start of the function)
+            if (userId) {
+                // 1. Save to the user's private quiz results collection
+                const userQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/users/${userId}/quizResults`);
+                await addDoc(userQuizResultsCollectionRef, {
+                    timestamp: new Date().toISOString(), // Store timestamp as an ISO string
+                    characterResult: text, // The character analysis
+                    answers: userAnswers,  // The raw answers from the quiz
+                    // No need for userId here as it's already in the path
+                });
+                console.log("Quiz result saved to user's private collection in Firestore.");
+
+                // 2. Save to the public quiz results collection for the leaderboard
+                const publicQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
+                await addDoc(publicQuizResultsCollectionRef, {
+                    timestamp: new Date().toISOString(),
+                    characterResult: text, // The character analysis
+                    userId: userId,        // Include userId for the public display
+                });
+                console.log("Quiz result saved to public collection for leaderboard.");
+            } else {
+                console.warn("User not authenticated, skipping Firestore save for quiz results.");
+                displayModal("Quiz completed, but login required to save results!", 'warning');
+            }
+            // --- END NEW CODE ---
                 // Save to private collection
                 // const privateResultsCollection = collection(db, `artifacts/${appId}/users/${userId}/quizResults`);
                 // await addDoc(privateResultsCollection, {
