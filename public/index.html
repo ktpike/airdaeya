@@ -275,6 +275,39 @@ const firebaseConfig = {
         const modalMessage = document.getElementById('modal-message');
         const modalCloseBtn = document.getElementById('modal-close-btn');
 
+        // --- Custom Modal Function ---
+function displayModal(message, type = 'info') {
+    if (modal && modalMessage) {
+        modalMessage.innerHTML = message;
+        // Optionally add classes based on type for styling (e.g., 'modal-success', 'modal-error')
+        // These classes are not defined in your provided CSS, so they won't have a visual effect yet,
+        // but the functional part of showing the modal will work.
+        modal.classList.remove('modal-success', 'modal-error', 'modal-info'); // Clear previous types
+        modal.classList.add(`modal-${type}`); // Add current type
+        
+        // Assuming 'hidden' and 'flex' are still active (e.g., from Tailwind or your own CSS)
+        modal.classList.remove('hidden'); // Show the modal
+        modal.classList.add('flex');     // Ensure it's displayed as flex
+    } else {
+        console.warn("Modal elements not found for displayModal:", message);
+        alert(message); // Fallback for debugging if modal not found
+    }
+}
+
+// Function to close the modal
+function closeModal() {
+    if (modal) {
+        // Assuming 'hidden' and 'flex' are still active
+        modal.classList.add('hidden');    // Hide the modal
+        modal.classList.remove('flex');  // Remove flex display
+    }
+}
+
+// Add event listener to the close button
+if (modalCloseBtn) {
+    modalCloseBtn.addEventListener('click', closeModal);
+}
+        
         // --- Quiz Data and State ---
         let currentQuestionIndex = 0;
         let userAnswers = [];
@@ -554,7 +587,7 @@ const firebaseConfig = {
                 return;
             }
             leaderboardList.innerHTML = '<li class="text-sm text-center text-gray-400">Loading leaderboard...</li>';
-            const publicResultsCollection = collection(db, `artifacts/${aetherium-c34f7}/public/data/quizResults`);
+            const publicResultsCollection = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
             onSnapshot(publicResultsCollection, (querySnapshot) => {
                 const results = [];
                 querySnapshot.forEach((doc) => {
