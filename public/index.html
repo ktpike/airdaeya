@@ -441,90 +441,107 @@ const firebaseConfig = {
                 
                 The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
         
+
                 const userQuery = `My answers to the Aetherium quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
-        
-                const apiKey = ""; // Leave this as-is
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-        
-                const payload = {
-                    contents: [{ parts: [{ text: userQuery }] }],
-                    systemInstruction: {
-                        parts: [{ text: systemPrompt }]
-                    },
-                };
-        
-                let response;
-                let retries = 0;
-                const maxRetries = 3;
-                while (retries < maxRetries) {
-                    try {
-                        response = await fetch(apiUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-                        if (response.ok) {
-                            break; // Success! Exit the retry loop
-                        } else {
-                            throw new Error(`API Error: ${response.statusText}`);
-                        }
-                    } catch (error) {
-                        console.error(`Attempt ${retries + 1} failed:`, error);
-                        retries++;
-                        if (retries < maxRetries) {
-                            const delay = Math.pow(2, retries) * 1000;
-                            await new Promise(res => setTimeout(res, delay));
-                        }
-                    }
-                }
-        
-                if (!response || !response.ok) {
-                    throw new Error("Failed to get a response from the API after multiple retries.");
-                }
-        
-                const result = await response.json();
-                const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
                 
-                if (!text) {
-                    throw new Error("Failed to retrieve text from the Gemini API response.");
-                }
+                // --- OLD GEMINI API PREPARATION (NOW COMMENTED OUT) ---
+                // const apiKey = ""; // Leave this as-is
+                // const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                //
+                // const payload = {
+                //     contents: [{ parts: [{ text: userQuery }] }],
+                //     systemInstruction: {
+                //         parts: [{ text: systemPrompt }]
+                //     },
+                // };
+                //
+                // let response;
+                // let retries = 0;
+                // const maxRetries = 3;
+                // while (retries < maxRetries) {
+                //     try {
+                //         response = await fetch(apiUrl, {
+                //             method: 'POST',
+                //             headers: { 'Content-Type': 'application/json' },
+                //             body: JSON.stringify(payload)
+                //         });
+                //         if (response.ok) {
+                //             break; // Success! Exit the retry loop
+                //         } else {
+                //             throw new Error(`API Error: ${response.statusText}`);
+                //         }
+                //     } catch (error) {
+                //         console.error(`Attempt ${retries + 1} failed:`, error);
+                //         retries++;
+                //         if (retries < maxRetries) {
+                //             const delay = Math.pow(2, retries) * 1000;
+                //             await new Promise(res => setTimeout(res, delay));
+                //         }
+                //     }
+                // }
+                //
+                // if (!response || !response.ok) {
+                //     throw new Error("Failed to get a response from the API after multiple retries.");
+                // }
+                //
+                // const result = await response.json();
+                // const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                // 
+                // if (!text) {
+                //     throw new Error("Failed to retrieve text from the Gemini API response.");
+                // }
+                // --- END OLD GEMINI API CALL ---
+                //
+                // --- NEW TEMPORARY PLACEHOLDER LOGIC ---
+                console.warn("Gemini API call is currently bypassed. Using a placeholder result for testing.");
+                const result = {
+                    candidates: [{
+                        content: {
+                            parts: [{ text: "**Qat** (Book 1 Catching Qat)\n\nYou exhibit a resourceful and adaptable nature, often making swift decisions and learning new skills quickly. Your approach to challenges is practical, even if it leads to a bit of mischief, and you possess an underlying intuition that guides your path. Much like Qat, you are shaped by experience and always ready for the next adventure." }]
+                        }
+                    }]
+                };
+                const text = result.candidates[0].content.parts[0].text;
+                // --- END NEW TEMPORARY PLACEHOLDER LOGIC ---
+                
+                resultContentEl.innerHTML = `<h2>Your Aetherium Character:</h2><div class="prose">${text}</div>`;
+                displayModal(text, 'success');
         
                 // Save to private collection
-                const privateResultsCollection = collection(db, `artifacts/${appId}/users/${userId}/quizResults`);
-                await addDoc(privateResultsCollection, {
-                    userId: userId,
-                    answers: userAnswers,
-                    characterResult: text,
-                    timestamp: new Date().toISOString(),
-                    rawApiResponse: result
-                });
-
+                // const privateResultsCollection = collection(db, `artifacts/${appId}/users/${userId}/quizResults`);
+                // await addDoc(privateResultsCollection, {
+                //     userId: userId,
+                //     answers: userAnswers,
+                //     characterResult: text,
+                //     timestamp: new Date().toISOString(),
+                //     rawApiResponse: result
+                // });
+                //
                 // Save to public collection
-                const publicResultsCollection = collection(db, `artifacts/${appId}/public/data/quizResults`);
-                await addDoc(publicResultsCollection, {
-                    userId: userId,
-                    characterResult: text,
-                    timestamp: new Date().toISOString()
-                });
-
-                const markdownContent = text.trim();
-                const [characterLine, ...descriptionLines] = markdownContent.split('\n');
-                const characterName = characterLine.replace(/\*\*/g, ''); // Remove bold markdown
-                const characterDescription = descriptionLines.join('\n').trim();
-        
-                resultContentEl.innerHTML = `
-                    <p class="font-bold text-3xl quiz-result-name">${characterName}</p>
-                    <p class="text-sm mt-4" style="color: #cccccc;">${characterDescription}</p>
-                `;
-                
+                // const publicResultsCollection = collection(db, `artifacts/${appId}/public/data/quizResults`);
+                // await addDoc(publicResultsCollection, {
+                //     userId: userId,
+                //     characterResult: text,
+                //     timestamp: new Date().toISOString()
+                // });
+                //
+                // const markdownContent = text.trim();
+                // const [characterLine, ...descriptionLines] = markdownContent.split('\n');
+                // const characterName = characterLine.replace(/\*\*/g, ''); // Remove bold markdown
+                // const characterDescription = descriptionLines.join('\n').trim();
+                //
+                // resultContentEl.innerHTML = `
+                //    <p class="font-bold text-3xl quiz-result-name">${characterName}</p>
+                //    <p class="text-sm mt-4" style="color: #cccccc;">${characterDescription}</p>
+                //`;
+                //    
                 // Show multiplayer section
-                userIdDisplay.textContent = userId;
-                multiplayerSection.classList.remove('hidden');
+                // userIdDisplay.textContent = userId;
+                // multiplayerSection.classList.remove('hidden');
 
             } catch (error) {
                 console.error("Error processing quiz:", error);
-                resultContentEl.textContent = "Oops! Something went wrong. Please try again.";
-                showModal("There was an error processing your quiz. Please check the console for details.");
+                displayModal(`Error processing quiz: ${error.message}`, 'error');
             } finally {
                 isLoading = false;
             }
@@ -537,7 +554,7 @@ const firebaseConfig = {
                 return;
             }
             leaderboardList.innerHTML = '<li class="text-sm text-center text-gray-400">Loading leaderboard...</li>';
-            const publicResultsCollection = collection(db, `artifacts/${appId}/public/data/quizResults`);
+            const publicResultsCollection = collection(db, `artifacts/${aetherium-c34f7}/public/data/quizResults`);
             onSnapshot(publicResultsCollection, (querySnapshot) => {
                 const results = [];
                 querySnapshot.forEach((doc) => {
