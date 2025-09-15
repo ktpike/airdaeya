@@ -1,4 +1,4 @@
-name: Deploy Aetherium to Firebase Hosting
+name: Deploy Airdaeya to Firebase Hosting
 
 on:
   push:

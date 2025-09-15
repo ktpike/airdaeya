@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aetherium: Character Quiz</title>
+    <title>Airdaeya: Character Quiz</title>
     <!-- Google Fonts for a custom fantasy look -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -108,7 +108,7 @@
         </button>
 
         <!-- Main title and subtitle -->
-        <h1 id="app-title" class="text-4xl font-extrabold mb-2" style="color: #500041; font-family: 'IM Fell English SC', serif;">Aetherium</h1>
+        <h1 id="app-title" class="text-4xl font-extrabold mb-2" style="color: #500041; font-family: 'IM Fell English SC', serif;">Airdaeya</h1>
         <h2 class="text-xl font-semibold mb-6" style="color: #dddddd; font-family: 'Alegreya', serif;">Aetheria's Compendium</h2>
 
         <!-- Authentication and Welcome Screen -->
@@ -315,84 +315,111 @@ if (modalCloseBtn) {
 
         const quizQuestions = [
             {
-                question: "As a young Drakkaen Nakkla, you discover a hidden, ancient ruin. What is your first instinct?",
+                question: "What's the most appealing form of recognition?",
                 answers: [
-                    "I cautiously examine the path, looking for any physical signs of danger or a hidden entrance.",
-                    "I listen to the spirits of the land to feel the history and magical echoes of the place.",
-                    "I analyze the architecture and inscriptions, seeking to understand its history through logic and reason.",
-                    "I slip inside quietly, looking for a way to use the ruins for a bit of mischief or a quick escape."
+                    "Being a respected authority with a lasting legacy.",
+                    "Being known for your cunning and ability to survive.",
+                    "Being a pioneer who creates something new and unheard of.",
+                    "Being a beloved member of your community."
                 ]
             },
             {
-                question: "A mysterious traveler offers you a rare, powerful magical artifact. What is your first thought?",
+                question: "What motivates you the most?",
                 answers: [
-                    "My gut instinct tells me to be wary. I prepare for a potential conflict or a quick getaway.",
-                    "I sense its magical aura, trying to understand its source and purpose through my connection to the elements.",
-                    "I use my mind to analyze its arcane properties, seeking to understand its internal structure.",
-                    "I try to charm the traveler and talk them into giving me the artifact for free."
+                    "Finding the truth about a mystery.",
+                    "Healing a deep-seated pain.",
+                    "Protecting your loved ones.",
+                    "Winning a thrilling contest."
                 ]
             },
             {
-                question: "The village elder has fallen ill with a mysterious blight. How do you approach the problem?",
+                question: "What makes you feel most at home?",
                 answers: [
-                    "I use my fighting skills and focus to find the physical source of the blight and destroy it.",
-                    "I try to use my magical powers to cleanse the blight from the elder's body.",
-                    "I consult ancient texts and scrolls for a forgotten cure or a logical path to a solution.",
-                    "I'll try to steal a cure from another village or find a quick escape from the problem."
+                    "Being with my family in a place of my own making.",
+                    "Finding a community of like-minded people.",
+                    "Working alone toward a major goal.",
+                    "Being in a place where I can truly be myself."
                 ]
             },
             {
-                question: "You need to find a legendary herb that grows only in a secluded, enchanted glade. How do you find it?",
+                question: "If you could instantly learn any skill, which would you choose?",
                 answers: [
-                    "I will use my survival instincts and knowledge of the wild to track the herb's location.",
-                    "I will use my elemental magic and connection to the spirits of nature to guide me to the herb.",
-                    "I'll consult a map and then find the most efficient path to get there.",
-                    "I'll try to charm someone into telling me where it is."
+                    "The ability to fix and build anything.",
+                    "The power to express yourself without words.",
+                    "The skill to persuade anyone to do what you want.",
+                    "The gift of seeing the future."
                 ]
             },
             {
-                question: "A pack of devil dogs blocks your path. What is your strategy?",
+                question: "What is your relationship with the past?",
                 answers: [
-                    "I will stand my ground and fight them head-on with my trusted weapon.",
-                    "I will use my words and song to persuade them to move aside.",
-                    "I will use my intellect to confuse and outwit them.",
-                    "I will use stealth and misdirection to slip past them unnoticed."
+                    "It's a source of valuable lessons.",
+                    "It's something to be avenged.",
+                    "It's a mystery waiting to be uncovered.",
+                    "It's something I'd prefer not to dwell on."
                 ]
             },
             {
-                question: "A secret diplomatic meeting is about to take place, but you suspect a saboteur is in the room. What is your approach?",
+                question: "What's the most appealing thing about a wild animal?",
                 answers: [
-                    "I will use my keen instincts to read body language and subtle cues.",
-                    "I'll try to bring the group together by offering a shared meal.",
-                    "I will use my psychic abilities to sense their intentions and thoughts.",
-                    "I'll try to steal the documents to uncover the plan and expose the saboteur."
+                    "Their single-minded focus and unwavering determination.",
+                    "Their ability to adapt and survive in any environment.",
+                    "Their playful and mischievous nature.",
+                    "Their gentle spirit and deep intuition."
                 ]
             },
             {
-                question: "A difficult problem stands in your way. What is your natural inclination for solving it?",
+                question: "What would be the most difficult challenge to face?",
                 answers: [
-                    "I'll trust my gut feelings and initial insights to guide me.",
-                    "I'll seek advice from everyone I trust and listen to their ideas.",
-                    "I'll analyze all of the information I can get to come up with a logical plan.",
-                    "I'll use my cunning and charm to talk my way out of the situation or find a quick escape."
+                    "Being unable to speak or communicate effectively.",
+                    "Having to follow rules and traditions you don't believe in.",
+                    "Living a life where your talents are never fully used.",
+                    "Being forced to live a quiet life without adventure."
                 ]
             },
             {
-                question: "You are tasked with finding a lost heirloom. How do you go about it?",
+                question: "Imagine a world full of secrets. What would you do with them?",
                 answers: [
-                    "I will track the heirloom's last location and search for physical clues.",
-                    "I'll use my magical abilities to sense its location.",
-                    "I'll look for historical records and maps that describe the location.",
-                    "I'll try to talk to people who might have seen it or know its whereabouts."
+                    "Use them to gain power and influence.",
+                    "Share them only with those who are worthy.",
+                    "Keep them to yourself, as they are your burden alone.",
+                    "Expose the most harmful ones for the good of all."
                 ]
             },
             {
-                question: "A band of marauders has stolen a sacred relic from your village. How do you react?",
+                question: "What does 'home' mean to you?",
                 answers: [
-                    "I will track them down using their tracks and clues they left behind.",
-                    "I will use my spiritual connection to the world around me to sense the direction the relic was taken.",
-                    "I will use my intelligence and knowledge to research the marauder's tactics and habits to predict their next move.",
-                    "I will use my charm and stealth to infiltrate their camp and retrieve the relic."
+                    "A place you built with your own hands.",
+                    "A place you are trying to get back to.",
+                    "A place you are trying to escape.",
+                    "A place where you can be a leader."
+                ]
+            },
+            {
+                question: "Which of these describes your deepest fear?",
+                answers: [
+                    "Losing control of yourself or your circumstances.",
+                    "Being misunderstood and never truly seen.",
+                    "Being abandoned by those you trust.",
+                    "Failing to fulfill your destiny."
+                ]
+            },
+            {
+                question: "What is your greatest strength?",
+                answers: [
+                    "My resourcefulness and quick wit.",
+                    "My loyalty to those who earn it.",
+                    "My ability to see the bigger picture.",
+                    "My courage to stand alone."
+                ]
+            },
+            {
+                question: "You're at a crossroads. Do you choose the path of...",
+                answers: [
+                    "...the most challenging path, the one that promises the most growth.",
+                    "...the one that leads to the most fame and recognition.",
+                    "...the one that is completely new and promises the most adventure.",
+                    "...the one that allows you to help those who need it most."
                 ]
             }
         ];
@@ -475,7 +502,7 @@ if (modalCloseBtn) {
                 The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
         
 
-                const userQuery = `My answers to the Aetherium quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
+                const userQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
                 
                 // --- OLD GEMINI API PREPARATION (NOW COMMENTED OUT) ---
                 // const apiKey = ""; // Leave this as-is
@@ -537,7 +564,7 @@ if (modalCloseBtn) {
                 const text = result.candidates[0].content.parts[0].text;
                 // --- END NEW TEMPORARY PLACEHOLDER LOGIC ---
                 
-                resultContentEl.innerHTML = `<h2>Your Aetherium Character:</h2><div class="prose">${text}</div>`;
+                resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
                 displayModal(text, 'success');
         
                     // --- NEW CODE: Firestore Write Operations ---
