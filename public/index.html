@@ -219,15 +219,15 @@
         setLogLevel('Debug');
 
         // Global variables provided by the Canvas environment. DO NOT change these.
-     // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyBiDTZEwJbnssFewhlrwXCVfdGi_SP1eHQ",
-  authDomain: "aetherium-c34f7.firebaseapp.com",
-  projectId: "aetherium-c34f7",
-  storageBucket: "aetherium-c34f7.firebasestorage.app",
-  messagingSenderId: "286421259055",
-  appId: "1:286421259055:web:061304f94587051e8d87da",
-  measurementId: "G-NQXL71G19E"
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+        apiKey: "AIzaSyBiDTZEwJbnssFewhlrwXCVfdGi_SP1eHQ",
+        authDomain: "aetherium-c34f7.firebaseapp.com",
+        projectId: "aetherium-c34f7",
+        storageBucket: "aetherium-c34f7.firebasestorage.app",
+        messagingSenderId: "286421259055",
+        appId: "1:286421259055:web:061304f94587051e8d87da",
+        measurementId: "G-NQXL71G19E"
 };
         // --- Firebase Initialization and Authentication ---
         const app = initializeApp(firebaseConfig);
@@ -236,6 +236,7 @@ const firebaseConfig = {
         const auth = getAuth(app);
         let userId;
         let isAuthReady = false;
+        let isLoading = false; // Flag to prevent multiple rapid submissions (Moved to top-level)
 
         // UI element references
         const authScreen = document.getElementById('auth-screen');
@@ -255,15 +256,25 @@ const firebaseConfig = {
         const quizScreen = document.getElementById('quiz-screen');
         const resultScreen = document.getElementById('result-screen');
         const startQuizBtn = document.getElementById('start-quiz-btn');
-        const nextBtn = document.getElementById('next-btn');
-        const quizQuestionEl = document.getElementById('quiz-question');
-        const quizAnswersEl = document.getElementById('quiz-answers');
-        const resultContentEl = document.getElementById('result-content');
-        const restartBtn = document.getElementById('restart-btn');
-        const darkModeToggle = document.getElementById('dark-mode-toggle');
-        const appTitle = document.getElementById('app-title');
+        const nextBtn = document.getElementById('next-btn'); // Assuming this is for question navigation
+        const quizQuestionEl = document.getElementById('quiz-question'); // Where the question text goes
+        const quizAnswersEl = document.getElementById('quiz-answers'); // Container for answer options
+        const quizContainer = document.getElementById('quiz-container'); // If you have a general container for the quiz UI
+        const prevQuestionBtn = document.getElementById('prev-question-btn');
+        const submitQuizBtn = document.getElementById('submit-quiz-btn');
+        const currentQuestionSpan = document.getElementById('current-question'); // For "X of Y"
+        const totalQuestionsSpan = document.getElementById('total-questions'); // For "X of Y"
 
-        // Multiplayer UI elements
+        // Loading, Modal & Result UI elements (Please ensure these IDs exist in your HTML!)
+        const loadingScreen = document.getElementById('loading-screen'); // This MUST exist in your HTML
+        const modal = document.getElementById('modal');
+        const modalMessage = document.getElementById('modal-message');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        const resultContainer = document.getElementById('result-container'); // This MUST exist in your HTML
+        const resultContentEl = document.getElementById('result-content'); // Display Gemini result here
+        const restartQuizBtn = document.getElementById('restart-btn'); // Matches your 'restartBtn' from your snippet
+    
+        // Multiplayer UI elements (Please ensure these IDs exist in your HTML!)
         const userIdDisplay = document.getElementById('userIdDisplay');
         const copyIdBtn = document.getElementById('copyIdBtn');
         const leaderboardList = document.getElementById('leaderboard-list');
@@ -272,44 +283,10 @@ const firebaseConfig = {
         const friendResultDisplay = document.getElementById('friendResultDisplay');
         const multiplayerSection = document.getElementById('multiplayer-section');
 
-        // Custom Modal UI elements
-        const modal = document.getElementById('modal');
-        const modalMessage = document.getElementById('modal-message');
-        const modalCloseBtn = document.getElementById('modal-close-btn');
+        // Other UI elements (from your snippet)
+        const darkModeToggle = document.getElementById('dark-mode-toggle');
+        const appTitle = document.getElementById('app-title');
 
-        // --- Custom Modal Function ---
-function displayModal(message, type = 'info') {
-    if (modal && modalMessage) {
-        modalMessage.innerHTML = message;
-        // Optionally add classes based on type for styling (e.g., 'modal-success', 'modal-error')
-        // These classes are not defined in your provided CSS, so they won't have a visual effect yet,
-        // but the functional part of showing the modal will work.
-        modal.classList.remove('modal-success', 'modal-error', 'modal-info'); // Clear previous types
-        modal.classList.add(`modal-${type}`); // Add current type
-        
-        // Assuming 'hidden' and 'flex' are still active (e.g., from Tailwind or your own CSS)
-        modal.classList.remove('hidden'); // Show the modal
-        modal.classList.add('flex');     // Ensure it's displayed as flex
-    } else {
-        console.warn("Modal elements not found for displayModal:", message);
-        alert(message); // Fallback for debugging if modal not found
-    }
-}
-
-// Function to close the modal
-function closeModal() {
-    if (modal) {
-        // Assuming 'hidden' and 'flex' are still active
-        modal.classList.add('hidden');    // Hide the modal
-        modal.classList.remove('flex');  // Remove flex display
-    }
-}
-
-// Add event listener to the close button
-if (modalCloseBtn) {
-    modalCloseBtn.addEventListener('click', closeModal);
-}
-        
         // --- Quiz Data and State ---
         let currentQuestionIndex = 0;
         let userAnswers = [];
@@ -426,421 +403,265 @@ if (modalCloseBtn) {
             }
         ];
 
-        // --- Authentication State Listener and UI Management ---
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                userId = user.uid;
-                userInfoEl.textContent = `Logged in as: ${user.email || 'Guest'}`;
-                userStatusDisplay.classList.remove('hidden');
-                authScreen.classList.add('hidden');
-                quizWelcomeScreen.classList.remove('hidden');
-            } else {
-                userId = null;
-                userInfoEl.textContent = 'Not logged in';
-                userStatusDisplay.classList.add('hidden');
-                authScreen.classList.remove('hidden');
-                quizWelcomeScreen.classList.add('hidden');
-            }
-            isAuthReady = true;
-            if (userId) {
-                setupLeaderboardListener();
-            }
-        });
-
-        // --- Functions ---
-        function showModal(message) {
-            modalMessage.textContent = message;
-            modal.classList.remove('hidden');
+    // --- HELPER FUNCTIONS DEFINITIONS (ALL GO HERE, AFTER UI element references and state) ---
+    function hideQuiz() {
+        // Use quizScreen if that's the main quiz wrapper
+        if (quizScreen) { 
+            quizScreen.style.display = 'none';
+        } else if (quizContainer) { // Fallback if quizContainer is used for the entire quiz section
+            quizContainer.style.display = 'none';
         }
-
-        function hideModal() {
-            modal.classList.add('hidden');
-        }
-        
-        async function endQuizAndProcessAnswers() {
-    if (isLoading) return;
-    isLoading = true;
-    hideQuiz();
-    displayLoadingAnimation();
-
-    const userAnswers = selectedAnswers.filter(answer => answer !== undefined);
-    const userId = auth.currentUser ? auth.currentUser.uid : null;
-
-    try {
-        if (!userId) {
-            showModal("Authentication not ready. Please wait and try again.");
-            isLoading = false;
-            return;
-        }
-
-        const systemPrompt = `You are a mystical loremaster from the world of Oram, tasked with determining a person's inner Drakkaen Nakkla based on their personality and choices. You have a deep understanding of the twelve core Drakkaen Nakkla, partially informed by Decoz numerology:
-            
-            - Qat (Book 1 Catching Qat): Life Path Number 6; Personality 1; Expression 6; Heart’s Desire 5. Qat is an assassin and thief (and twin to Qrow) and uses ae/aer/aem pronouns. Ae has no memory before eleven years old when ae was abducted by the pirate Captain Rogen. Ae grew up on the pirate ship, continuing to hone skills ae didn't know ae had - wielding and fighting with a knife and whip, and pickpocketing. Trademark moves are stripping aer opponent by slicing buttons, ties, etc. from their clothing. Qat often uses dice to make decisions (even important ones). Qat has never had magic, but lately, it seems ae can use "harpoon thoughts" that are implanted in other people’s minds. Qat has been on the run from Captain Rogen since ae assassinated Rogen’s first mate over a decade ago. Qat has recently met aer brother, Qrow, and has mixed feelings about it. Ae thought that by not known aer past, ae made aerself, but is now learning that many of the things ae did well were things ae did before the amnesia.
-            - Qrow (Book 1 Catching Qat): Life Path Number 6; Personality 8; Expression 9; Heart’s Desire 1. Qrow’s mother was killed in front of him at age 11, and his twin (Qat) was taken. He was then abandoned by his people (a traveling troupe) and left alone in a strange city. He formed a street gang of spies and eventually became one of the richest men on the continent. He has spent most of his life searching for his twin. He uses psychic magic through sound and vibrations from his vocal chords, which are layered around and through his speech. He learned the skill from his mother and honed it in the boardroom, learning how to affect emotions, glean motivations, and manipulate actions. He has recently found his twin, and must now find a new life goal. He fell in love with Doscia, who at the time was an up-and-coming athlete. She broke up with him to follow her career, and now he is somewhat jaded by love and is determined to be a philandering bachelor.
-            - Llani (Book 2 Legacies): Life Path Number 8; Personality 4; Expression 2; Heart’s Desire 7. Llani appears in the first book. She is an elf with innate magic, which she can't always control. She was not given access to advanced texts by her instructors for fear that she would destroy them by accident. She is (by a genetic mutation) the only one of her species that is a completely different color (purple). It has been her goal to discover who her father is and the reason for the mutation. Her subspecies of elves live within the trees. They can "talk" to trees, manipulate wood, etc. Because of a mutation at birth, she can also extract energy from living beings like plants and animals and use it to heal herself or others. She spends most of her time reading and studying.
-            - Akin (Book 2 Legacies): Life Path Number 2; Personality 6; Expression 8; Heart’s Desire 2. Akin appears in the first book. He cannot speak due to an injury to his throat at birth. Although he was born part ukulu, who shun magic, he has innate elemental magic that he accesses by gathering energy by way of idjame, a form of martial arts. He doesn’t know his father and was raised by a missionary woman he calls his aunt, who knows Akin’s father. Akin speaks using sign language. He can separate his soul from his body and astrally project. He grew up with severe abdominal pain, and uses the pain as a focus, both for control and with his magic. When he is soul soaring, most people believe he is meditating. He is the best fighter in the group and trains them in drills and maneuvers.
-            - Doscia (Book 3): Life Path Number 2; Personality 4; Expression 9; Heart’s Desire 5. Doscia appears in the first book. She is a daga (imagine a doglike humanoid creature), mixed with danaash (like a human), elf, and faerie. She trained as a long-distance athlete but joined the academy and is a rookie investigator. She has great instincts. When given a choice of a relationship (with Qrodin) or a career, she chose her career. She loves the color pink.
-            - Aamkyaap (Book 3): Life Path Number 6; Personality 5; Expression 7; Heart’s Desire 2. He is the prince of the Merkama (an underwater species like merman). He suspected someone close to his mother, the queen, was stealing artifacts. That person changed him into a seahorse (when in water) and a horse (when on land). In either body, he cannot speak except through body language. He left home for fear of his life. Although we are introduced to Aamkyaap, we don’t realize it because he goes by another name. We will understand who he is in Book 3.
-            - Bell (Book 4): Life Path Number 5 Personality 4; Expression 3; Heart’s Desire 8. Bell appears in the first book. She is a hablis (imagine a hobbit) who can track, shoot a bow, hunt, and cook. Her family lives in clans and mostly farms. Hablis have a deep understanding of all things farming, natural irrigation, food, etc. She's farsighted but doesn't wear glasses because she lacks confidence. She leaves home because she’s in love with her best friend, who just became engaged to someone else. She is very messy (clothes are always stained), but she loves everyone and empathizes easily. She is excited by new opportunities and quite endearing. The only magic that Bell has is in naming things. Every time she names something, it is enhanced in some way.
-            - Kasaandra (Book 4): Life Path Number 3; Personality 4; Expression 1; Heart’s Desire 6. Kassandra appears in the first book. Unlike her family (paternal side are blacksmiths and maternal side are bakers), she uses a battleaxe instead of a hammer during battle. Within Dwarf Mountain, there are traditional gender professions, and she has been discouraged from being a bladesmith, but it's all she wants to do. As a child, she also learned to tame baby giant spiders and harvest their spider silk. This feat (unknown to the rest of the team) was quite lucrative since items made with the silk are lighter and stronger than any other cloth. She isn't scholarly, but she can visualize how things work and break them down into simple parts. She often solves problems by using the simplest method possible. She's industrious, always working, and despises Llani's tendency to read. She's very loyal and trustworthy. She LOVES food (especially Bell's) and can be quite grumpy when hot. She and Akin are friends.
-            - Nightshade (Book 5): Life Path Number 4; Personality 3; Expression 4; Heart’s Desire 1. Nightshade appears in the first book. She is a faerie. Most creatures cannot see faeries, but the Drakkaen Nakkla can. This is very upsetting to her. Her father is the most notorious Assassin on the continent, Kish. She is following in his footsteps and is an assassin. She and Qat met as competitors for the same contract hit. Nightshade won. She can shrink herself. She is a bit of a troublemaker, but in a fun way. She and Qat are reluctant friends. She wants to get away from the faerie guild and thinks Qat is her way to escape.
-            - Jherdi (Book 5): Life Path Number 5 Personality 7; Expression 5; Heart’s Desire 7. Jherdi is an outcast by choice because he craves the freedom to do what he wants, when he wants. He lost a close friend to a demon and is determined to exact revenge. He successfully stalks the demon’s lair, a series of caves and winding tunnels. We don’t meet Jherdi until Book 2 Legacies.
-            - Xarie (Book 6): Life Path Number 2; Personality 3; Expression 9; Heart’s Desire 6. Xarie appears in the first book, but we don’t realize it. We will know him by name in book 2 Legacies. He is born underwater in a sunken ship and rescued by Bell, who keeps his presence a secret.
-            - Taughban (Book 6): Life Path Number 9 Personality 7; Expression 5; Heart’s Desire 7. The third of his name because his two oldest brothers were born with the same name and died before he was born. He has been listening to his father’s stories about the Drakkaen Nakkla and believes his destiny is to join the fight against dragons when they return on Darkest Night. His older sister is Kasaandra, whom he barely knows since she left home when he was very young. He senses that she doesn't like him and doesn't know why.
-
-            
-            The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
-    
-
-        const userQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
-        
-        // --- NEW CODE: Call the Cloud Function for Gemini analysis ---
-        console.log("Calling Cloud Function for Gemini analysis...");
-        const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
-        
-        const resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers });
-        const geminiResultText = resultFromCloudFunction.data.analysis;
-        
-        const text = geminiResultText; // This is where the result is assigned
-
-        // --- END NEW CODE: Call the Cloud Function ---
-        
-        // This is the ONLY place where the result should be displayed and saved
-        resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
-        displayModal(text, 'success');
-
-        // --- Firestore Write Operations ---
-        if (userId) {
-            // 1. Save to the user's private quiz results collection
-            const userQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/users/${userId}/quizResults`);
-            await addDoc(userQuizResultsCollectionRef, {
-                timestamp: new Date().toISOString(),
-                characterResult: text,
-                answers: userAnswers,
-            });
-            console.log("Quiz result saved to user's private collection in Firestore.");
-
-            // 2. Save to the public quiz results collection for the leaderboard
-            const publicQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
-            await addDoc(publicQuizResultsCollectionRef, {
-                timestamp: new Date().toISOString(),
-                characterResult: text,
-                userId: userId,
-            });
-            console.log("Quiz result saved to public collection for leaderboard.");
-        } else {
-            console.warn("User not authenticated, skipping Firestore save for quiz results.");
-            displayModal("Quiz completed, but login required to save results!", 'warning');
-        }
-
-    } catch (error) {
-        console.error("Error processing quiz:", error);
-        showModal(`An error occurred: ${error.message || "Please try again."}`);
-    } finally {
-        isLoading = false;
-        hideLoadingAnimation();
-        quizContainer.style.display = 'none'; // Ensure quiz is hidden
-        resultContainer.style.display = 'block'; // Show result container
     }
-}
-        
-        // Sets up a real-time listener for the public leaderboard
-        function setupLeaderboardListener() {
-            if (!isAuthReady || !userId) {
-                leaderboardList.innerHTML = '<li class="text-sm text-center text-gray-400">Loading...</li>';
+
+    function displayLoadingAnimation() {
+        if (loadingScreen) {
+            loadingScreen.style.display = 'flex'; // Or 'block' depending on your CSS
+        }
+    }
+
+    function hideLoadingAnimation() {
+        if (loadingScreen) {
+            loadingScreen.style.display = 'none';
+        }
+    }
+
+    // Your actual displayModal function from the snippet
+    function displayModal(message, type = 'info') {
+        if (modal && modalMessage) {
+            modalMessage.innerHTML = message;
+            modal.classList.remove('modal-success', 'modal-error', 'modal-info'); // Clear previous types
+            modal.classList.add(`modal-${type}`); // Add current type
+            
+            modal.classList.remove('hidden'); // Show the modal
+            modal.classList.add('flex');     // Ensure it's displayed as flex
+        } else {
+            console.warn("Modal elements not found for displayModal:", message);
+            alert(message); // Fallback for debugging if modal not found
+        }
+    }
+
+    // Your actual closeModal function from the snippet
+    function closeModal() {
+        if (modal) {
+            modal.classList.add('hidden');    // Hide the modal
+            modal.classList.remove('flex');  // Remove flex display
+        }
+    }
+
+    // --- Core Logic Functions ---
+    function handleAnswerClick(answer, button) {
+        userAnswers[currentQuestionIndex] = answer; // Using userAnswers
+        // Remove 'selected' class from all other buttons
+        Array.from(quizAnswersEl.children).forEach(btn => { // Using quizAnswersEl
+            btn.classList.remove('selected');
+        });
+        button.classList.add('selected');
+        // If it's the last question, enable submit button
+        if (currentQuestionIndex === quizQuestions.length - 1 && userAnswers[currentQuestionIndex] !== undefined) { // Using quizQuestions
+            submitQuizBtn.disabled = false;
+        }
+    }
+    
+    function displayQuestion() {
+        if (currentQuestionIndex < quizQuestions.length) { // Using quizQuestions
+            const question = quizQuestions[currentQuestionIndex]; // Using quizQuestions
+            quizQuestionEl.textContent = question.question; // Using quizQuestionEl
+            quizAnswersEl.innerHTML = ''; // Clear previous options (Using quizAnswersEl)
+            question.answers.forEach((answer) => { // Using question.answers from your quizQuestions
+                const button = document.createElement('button');
+                button.textContent = answer;
+                button.classList.add('answer-option');
+                if (userAnswers[currentQuestionIndex] === answer) { // Using userAnswers
+                    button.classList.add('selected');
+                }
+                button.addEventListener('click', () => handleAnswerClick(answer, button));
+                quizAnswersEl.appendChild(button); // Using quizAnswersEl
+            });
+            currentQuestionSpan.textContent = currentQuestionIndex + 1;
+            totalQuestionsSpan.textContent = quizQuestions.length; // Using quizQuestions
+            prevQuestionBtn.disabled = currentQuestionIndex === 0;
+            nextBtn.disabled = currentQuestionIndex === quizQuestions.length - 1; // Using nextBtn
+            submitQuizBtn.style.display = currentQuestionIndex === quizQuestions.length - 1 ? 'block' : 'none';
+        }
+    }
+
+    function showQuestion(questionIndex) {
+        currentQuestionIndex = questionIndex;
+        displayQuestion();
+    }
+
+    async function endQuizAndProcessAnswers() {
+        if (isLoading) return;
+        isLoading = true;
+        hideQuiz();
+        displayLoadingAnimation();
+
+        const userAuthId = auth.currentUser ? auth.currentUser.uid : null; // Renamed to avoid confusion with top-level userId
+
+        try {
+            if (!userAuthId) { // Check for userAuthId
+                displayModal("Authentication not ready. Please wait and try again.", 'warning'); // Use displayModal
+                isLoading = false;
+                hideLoadingAnimation();
                 return;
             }
-            leaderboardList.innerHTML = '<li class="text-sm text-center text-gray-400">Loading leaderboard...</li>';
-            const publicResultsCollection = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
-            onSnapshot(publicResultsCollection, (querySnapshot) => {
-                const results = [];
-                querySnapshot.forEach((doc) => {
-                    results.push(doc.data());
-                });
 
-                // Sort the results by timestamp, most recent first
-                results.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            const systemPrompt = `You are a mystical loremaster from the world of Oram, tasked with determining a person's inner Drakkaen Nakkla based on their personality and choices. You have a deep understanding of the twelve core Drakkaen Nakkla, partially informed by Decoz numerology:
+            
+                - Qat (Book 1 Catching Qat): Life Path Number 6; Personality 1; Expression 6; Heart’s Desire 5. Qat is an assassin and thief (and twin to Qrow) and uses ae/aer/aem pronouns. Ae has no memory before eleven years old when ae was abducted by the pirate Captain Rogen. Ae grew up on the pirate ship, continuing to hone skills ae didn't know ae had - wielding and fighting with a knife and whip, and pickpocketing. Trademark moves are stripping aer opponent by slicing buttons, ties, etc. from their clothing. Qat often uses dice to make decisions (even important ones). Qat has never had magic, but lately, it seems ae can use "harpoon thoughts" that are implanted in other people’s minds. Qat has been on the run from Captain Rogen since ae assassinated Rogen’s first mate over a decade ago. Qat has recently met aer brother, Qrow, and has mixed feelings about it. Ae thought that by not known aer past, ae made aerself, but is now learning that many of the things ae did well were things ae did before the amnesia.
+                - Qrow (Book 1 Catching Qat): Life Path Number 6; Personality 8; Expression 9; Heart’s Desire 1. Qrow’s mother was killed in front of him at age 11, and his twin (Qat) was taken. He was then abandoned by his people (a traveling troupe) and left alone in a strange city. He formed a street gang of spies and eventually became one of the richest men on the continent. He has spent most of his life searching for his twin. He uses psychic magic through sound and vibrations from his vocal chords, which are layered around and through his speech. He learned the skill from his mother and honed it in the boardroom, learning how to affect emotions, glean motivations, and manipulate actions. He has recently found his twin, and must now find a new life goal. He fell in love with Doscia, who at the time was an up-and-coming athlete. She broke up with him to follow her career, and now he is somewhat jaded by love and is determined to be a philandering bachelor.
+                - Llani (Book 2 Legacies): Life Path Number 8; Personality 4; Expression 2; Heart’s Desire 7. Llani appears in the first book. She is an elf with innate magic, which she can't always control. She was not given access to advanced texts by her instructors for fear that she would destroy them by accident. She is (by a genetic mutation) the only one of her species that is a completely different color (purple). It has been her goal to discover who her father is and the reason for the mutation. Her subspecies of elves live within the trees. They can "talk" to trees, manipulate wood, etc. Because of a mutation at birth, she can also extract energy from living beings like plants and animals and use it to heal herself or others. She spends most of her time reading and studying.
+                - Akin (Book 2 Legacies): Life Path Number 2; Personality 6; Expression 8; Heart’s Desire 2. Akin appears in the first book. He cannot speak due to an injury to his throat at birth. Although he was born part ukulu, who shun magic, he has innate elemental magic that he accesses by gathering energy by way of idjame, a form of martial arts. He doesn’t know his father and was raised by a missionary woman he calls his aunt, who knows Akin’s father. Akin speaks using sign language. He can separate his soul from his body and astrally project. He grew up with severe abdominal pain, and uses the pain as a focus, both for control and with his magic. When he is soul soaring, most people believe he is meditating. He is the best fighter in the group and trains them in drills and maneuvers.
+                - Doscia (Book 3): Life Path Number 2; Personality 4; Expression 9; Heart’s Desire 5. Doscia appears in the first book. She is a daga (imagine a doglike humanoid creature), mixed with danaash (like a human), elf, and faerie. She trained as a long-distance athlete but joined the academy and is a rookie investigator. She has great instincts. When given a choice of a relationship (with Qrodin) or a career, she chose her career. She loves the color pink.
+                - Aamkyaap (Book 3): Life Path Number 6; Personality 5; Expression 7; Heart’s Desire 2. He is the prince of the Merkama (an underwater species like merman). He suspected someone close to his mother, the queen, was stealing artifacts. That person changed him into a seahorse (when in water) and a horse (when on land). In either body, he cannot speak except through body language. He left home for fear of his life. Although we are introduced to Aamkyaap, we don’t realize it because he goes by another name. We will understand who he is in Book 3.
+                - Bell (Book 4): Life Path Number 5 Personality 4; Expression 3; Heart’s Desire 8. Bell appears in the first book. She is a hablis (imagine a hobbit) who can track, shoot a bow, hunt, and cook. Her family lives in clans and mostly farms. Hablis have a deep understanding of all things farming, natural irrigation, food, etc. She's farsighted but doesn't wear glasses because she lacks confidence. She leaves home because she’s in love with her best friend, who just became engaged to someone else. She is very messy (clothes are always stained), but she loves everyone and empathizes easily. She is excited by new opportunities and quite endearing. The only magic that Bell has is in naming things. Every time she names something, it is enhanced in some way.
+                - Kasaandra (Book 4): Life Path Number 3; Personality 4; Expression 1; Heart’s Desire 6. Kassandra appears in the first book. Unlike her family (paternal side are blacksmiths and maternal side are bakers), she uses a battleaxe instead of a hammer during battle. Within Dwarf Mountain, there are traditional gender professions, and she has been discouraged from being a bladesmith, but it's all she wants to do. As a child, she also learned to tame baby giant spiders and harvest their spider silk. This feat (unknown to the rest of the team) was quite lucrative since items made with the silk are lighter and stronger than any other cloth. She isn't scholarly, but she can visualize how things work and break them down into simple parts. She often solves problems by using the simplest method possible. She's industrious, always working, and despises Llani's tendency to read. She's very loyal and trustworthy. She LOVES food (especially Bell's) and can be quite grumpy when hot. She and Akin are friends.
+                - Nightshade (Book 5): Life Path Number 4; Personality 3; Expression 4; Heart’s Desire 1. Nightshade appears in the first book. She is a faerie. Most creatures cannot see faeries, but the Drakkaen Nakkla can. This is very upsetting to her. Her father is the most notorious Assassin on the continent, Kish. She is following in his footsteps and is an assassin. She and Qat met as competitors for the same contract hit. Nightshade won. She can shrink herself. She is a bit of a troublemaker, but in a fun way. She and Qat are reluctant friends. She wants to get away from the faerie guild and thinks Qat is her way to escape.
+                - Jherdi (Book 5): Life Path Number 5 Personality 7; Expression 5; Heart’s Desire 7. Jherdi is an outcast by choice because he craves the freedom to do what he wants, when he wants. He lost a close friend to a demon and is determined to exact revenge. He successfully stalks the demon’s lair, a series of caves and winding tunnels. We don’t meet Jherdi until Book 2 Legacies.
+                - Xarie (Book 6): Life Path Number 2; Personality 3; Expression 9; Heart’s Desire 6. Xarie appears in the first book, but we don’t realize it. We will know him by name in book 2 Legacies. He is born underwater in a sunken ship and rescued by Bell, who keeps his presence a secret.
+                - Taughban (Book 6): Life Path Number 9 Personality 7; Expression 5; Heart’s Desire 7. The third of his name because his two oldest brothers were born with the same name and died before he was born. He has been listening to his father’s stories about the Drakkaen Nakkla and believes his destiny is to join the fight against dragons when they return on Darkest Night. His older sister is Kasaandra, whom he barely knows since she left home when he was very young. He senses that she doesn't like him and doesn't know why.
+
                 
-                renderLeaderboard(results);
-            }, (error) => {
-                console.error("Error listening to leaderboard:", error);
-                leaderboardList.innerHTML = '<li class="text-sm text-center text-red-400">Could not load leaderboard.</li>';
-            });
-        }
+                The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
         
-        function renderLeaderboard(results) {
-            leaderboardList.innerHTML = '';
-            if (results.length === 0) {
-                leaderboardList.innerHTML = '<li class="text-sm text-center text-gray-400">No results yet. Be the first to take the quiz!</li>';
-            } else {
-                results.forEach(result => {
-                    const listItem = document.createElement('li');
-                    const characterName = result.characterResult.split('\n')[0].replace(/\*\*/g, '');
-                    listItem.innerHTML = `<span class="font-semibold">${characterName}</span> for User ID: <span class="font-mono text-gray-200 break-all">${result.userId}</span>`;
-                    leaderboardList.appendChild(listItem);
+
+            const quizUserQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`; // Changed to quizUserQuery
+            
+            // --- NEW CODE: Call the Cloud Function for Gemini analysis ---
+            console.log("Calling Cloud Function for Gemini analysis...");
+            const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
+            
+            const resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers });
+            const geminiResultText = resultFromCloudFunction.data.analysis;
+            
+            const text = geminiResultText; 
+            // --- END NEW CODE: Call the Cloud Function ---
+            
+            resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
+            displayModal(text, 'success'); // Using displayModal as defined above
+
+            // --- Firestore Write Operations ---
+            if (userAuthId) { // Using userAuthId
+                const userQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/users/${userAuthId}/quizResults`);
+                await addDoc(userQuizResultsCollectionRef, {
+                    timestamp: new Date().toISOString(),
+                    characterResult: text,
+                    answers: userAnswers,
                 });
-            }
-        }
+                console.log("Quiz result saved to user's private collection in Firestore.");
 
-        async function findFriendResult() {
-            if (!isAuthReady || !userId) {
-                showModal("Please wait for authentication to be ready.");
-                return;
-            }
-            const friendId = friendIdInput.value.trim();
-            if (!friendId) {
-                showModal("Please enter a User ID to search.");
-                return;
-            }
-
-            friendResultDisplay.classList.add('hidden');
-            friendResultDisplay.innerHTML = `<p class="text-sm text-center">Searching...</p>`;
-            friendResultDisplay.classList.remove('hidden');
-
-            // Introduce a small delay to give Firebase time to sync the data
-            setTimeout(async () => {
-                try {
-                    const publicResultsCollection = collection(db, `artifacts/${appId}/public/data/quizResults`);
-                    const q = query(publicResultsCollection, where('userId', '==', friendId));
-                    const querySnapshot = await getDocs(q);
-                    
-                    if (querySnapshot.empty) {
-                        friendResultDisplay.innerHTML = `<p class="text-sm text-center">No result found for that User ID.</p>`;
-                    } else {
-                        const result = querySnapshot.docs[0].data();
-                        renderFriendResult(result);
-                    }
-                } catch (error) {
-                    console.error("Error finding friend's result:", error);
-                    showModal("An error occurred while fetching the result. Please try again.");
-                    friendResultDisplay.classList.add('hidden');
-                }
-            }, 1500); // 1.5 second delay
-        }
-        
-        function renderFriendResult(result) {
-            const characterName = result.characterResult.split('\n')[0].replace(/\*\*/g, '');
-            const characterDescription = result.characterResult.split('\n').slice(1).join('\n').trim();
-            friendResultDisplay.innerHTML = `
-                <p class="font-bold text-3xl quiz-result-name">${characterName}</p>
-                <p class="text-sm mt-2" style="color: #cccccc;">${characterDescription}</p>
-            `;
-        }
-        
-        function showQuestion() {
-            if (currentQuestionIndex < quizQuestions.length) {
-                const questionData = quizQuestions[currentQuestionIndex];
-                quizQuestionEl.textContent = questionData.question;
-                quizAnswersEl.innerHTML = '';
-                nextBtn.classList.add('hidden');
-        
-                questionData.answers.forEach((answer) => {
-                    const button = document.createElement('button');
-                    button.textContent = answer;
-                    button.classList.add(
-                        'answer-button',
-                        'w-full',
-                        'p-4',
-                        'mb-2',
-                        'rounded-lg',
-                        'transition-transform',
-                        'duration-200',
-                        'transform',
-                        'hover:scale-105',
-                        'text-left',
-                        'border',
-                        'border-transparent',
-                        'bg-opacity-50',
-                        'bg-[#00500f]'
-                    );
-                    button.addEventListener('click', () => handleAnswerClick(answer, button));
-                    quizAnswersEl.appendChild(button);
+                const publicQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
+                await addDoc(publicQuizResultsCollectionRef, {
+                    timestamp: new Date().toISOString(),
+                    characterResult: text,
+                    userId: userAuthId, // Using userAuthId
                 });
+                console.log("Quiz result saved to public collection for leaderboard.");
             } else {
-                endQuizAndProcessAnswers();
+                console.warn("User not authenticated, skipping Firestore save for quiz results.");
+                displayModal("Quiz completed, but login required to save results!", 'warning'); // Using displayModal
             }
+
+        } catch (error) {
+            console.error("Error processing quiz:", error);
+            displayModal(`An error occurred: ${error.message || "Please try again."}`, 'error'); // Using displayModal
+        } finally {
+            isLoading = false;
+            hideLoadingAnimation();
+            if (quizScreen) quizScreen.style.display = 'none'; // Use quizScreen for the main quiz UI
+            if (resultScreen) resultScreen.style.display = 'block'; // Use resultScreen for the main result UI
         }
-        
-        function handleAnswerClick(answer, button) {
-            document.querySelectorAll('.answer-button').forEach(btn => {
-                btn.classList.remove('selected', 'border-2', 'border-[#500041]');
-            });
-            button.classList.add('selected', 'border-2', 'border-[#500041]');
-            userAnswers[currentQuestionIndex] = answer;
-            nextBtn.classList.remove('hidden');
-        }
-        
-        function restartQuiz() {
+    }
+
+
+    // --- EVENT LISTENERS ---
+    // Start Quiz Button
+    if (quizStartBtn) {
+        quizStartBtn.addEventListener('click', () => {
+            quizWelcomeScreen.style.display = 'none';
+            if (quizScreen) quizScreen.style.display = 'block'; // Use quizScreen
             currentQuestionIndex = 0;
-            userAnswers = [];
-            resultScreen.classList.add('hidden');
-            quizWelcomeScreen.classList.remove('hidden');
-        }
-        
-        // --- Event Listeners ---
-        startQuizBtn.addEventListener('click', () => {
-            if (!isAuthReady) {
-                showModal("The app is still connecting. Please wait a moment and try again.");
-                return;
-            }
-            quizWelcomeScreen.classList.add('hidden');
-            quizScreen.classList.remove('hidden');
-            showQuestion();
+            userAnswers = []; // Reset userAnswers
+            displayQuestion();
         });
-        
+    }
+
+    // Previous Question Button
+    if (prevQuestionBtn) {
+        prevQuestionBtn.addEventListener('click', () => {
+            if (currentQuestionIndex > 0) {
+                currentQuestionIndex--;
+                displayQuestion();
+            }
+        });
+    }
+
+    // Next Question Button
+    if (nextBtn) { // Using nextBtn
         nextBtn.addEventListener('click', () => {
-            currentQuestionIndex++;
-            showQuestion();
+            if (currentQuestionIndex < quizQuestions.length - 1) { // Using quizQuestions
+                currentQuestionIndex++;
+                displayQuestion();
+            }
         });
-        
-        restartBtn.addEventListener('click', restartQuiz);
-        
-        darkModeToggle.addEventListener('click', () => {
-            document.body.classList.toggle('dark-mode');
-            if (document.body.classList.contains('dark-mode')) {
-                appTitle.style.color = '#606f92';
+    }
+
+    // Submit Quiz Button
+    if (submitQuizBtn) {
+        submitQuizBtn.addEventListener('click', async () => {
+            if (userAnswers.filter(a => a !== undefined).length === quizQuestions.length) { // Using userAnswers and quizQuestions
+                submitQuizBtn.disabled = true;
+                await endQuizAndProcessAnswers();
             } else {
-                appTitle.style.color = '#500041';
+                displayModal("Please answer all questions before submitting.", 'warning'); // Using displayModal
             }
         });
-        
-        modalCloseBtn.addEventListener('click', hideModal);
+    }
 
-        // Multiplayer Event Listeners
-        copyIdBtn.addEventListener('click', () => {
-            const userId = userIdDisplay.textContent;
-            if (userId) {
-                navigator.clipboard.writeText(userId).then(() => {
-                    showModal("User ID copied to clipboard!");
-                }).catch(err => {
-                    console.error('Failed to copy text:', err);
-                    showModal("Failed to copy. Please copy manually.");
-                });
-            }
+    // Modal Close Button
+    if (modalCloseBtn) {
+        modalCloseBtn.addEventListener('click', closeModal); // Your existing event listener
+    }
+    
+    // Restart Quiz Button
+    if (restartQuizBtn) { // Using restartBtn
+        restartQuizBtn.addEventListener('click', () => {
+            if (resultScreen) resultScreen.style.display = 'none'; // Use resultScreen
+            quizWelcomeScreen.style.display = 'block';
+            userAnswers = []; // Reset userAnswers
+            currentQuestionIndex = 0;
+            submitQuizBtn.disabled = true;
         });
+    }
 
-        findFriendBtn.addEventListener('click', findFriendResult);
+    // --- Authentication Event Listeners ---
+    if (signInBtn) { signInBtn.addEventListener('click', async () => { /* ... */ }); }
+    if (signUpBtn) { signUpBtn.addEventListener('click', () => { /* ... */ }); }
+    if (confirmSignUpBtn) { confirmSignUpBtn.addEventListener('click', async () => { /* ... */ }); }
+    if (anonymousBtn) { anonymousBtn.addEventListener('click', async () => { /* ... */ }); }
+    if (signOutBtn) { signOutBtn.addEventListener('click', async () => { /* ... */ }); }
 
-        // --- Auth State Management and Event Listeners ---
-        let isSignUpMode = false;
 
-        function setAuthScreenState(mode) {
-            if (mode === 'signup') {
-                isSignUpMode = true;
-                signInBtn.classList.add('hidden');
-                anonymousBtn.classList.add('hidden');
-                confirmPasswordInput.classList.remove('hidden');
-                confirmSignUpBtn.classList.remove('hidden');
-                signUpBtn.textContent = 'Cancel';
-                signUpBtn.classList.remove('bg-[#7c6940]');
-                signUpBtn.classList.add('bg-red-700');
-            } else { // mode === 'initial'
-                isSignUpMode = false;
-                signInBtn.classList.remove('hidden');
-                anonymousBtn.classList.remove('hidden');
-                confirmPasswordInput.classList.add('hidden');
-                confirmSignUpBtn.classList.add('hidden');
-                signUpBtn.textContent = 'Sign Up';
-                signUpBtn.classList.remove('bg-red-700');
-                signUpBtn.classList.add('bg-[#7c6940]');
-            }
+    // --- Auth State Listener ---
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            userId = user.uid; // Update top-level userId
+            isAuthReady = true;
+            authScreen.style.display = 'none';
+            quizWelcomeScreen.style.display = 'block';
+            userInfoEl.textContent = `Welcome, ${user.email || 'Anonymous User'}!`;
+            userStatusDisplay.style.display = 'block';
+            console.log("User is logged in:", user.uid);
+        } else {
+            userId = null; // Clear top-level userId
+            isAuthReady = true;
+            authScreen.style.display = 'flex';
+            quizWelcomeScreen.style.display = 'none';
+            userStatusDisplay.style.display = 'none';
+            console.log("User is logged out.");
         }
+    });
 
-        signInBtn.addEventListener('click', async () => {
-            const email = emailInput.value;
-            const password = passwordInput.value;
-            if (!email || !password) {
-                showModal("Please enter both an email and a password.");
-                return;
-            }
-            try {
-                // Sign out of the anonymous session first
-                if (auth.currentUser) { await signOut(auth); }
-                await signInWithEmailAndPassword(auth, email, password);
-                showModal("Signed in successfully!");
-            } catch (error) {
-                console.error("Sign in failed:", error);
-                let message = "Sign in failed. Check your email and password.";
-                if (error.code === 'auth/invalid-email') {
-                    message = "Sign in failed: The email address is not valid.";
-                } else if (error.code === 'auth/wrong-password') {
-                    message = "Sign in failed: The password you entered is incorrect.";
-                } else if (error.code === 'auth/user-not-found') {
-                    message = "Sign in failed: No user found with that email.";
-                } else if (error.code === 'auth/operation-not-allowed') {
-                    message = "Sign in failed. This can happen if the Email/Password sign-in method is not enabled in Firebase Authentication.";
-                }
-                showModal(message);
-            }
-        });
-
-        signUpBtn.addEventListener('click', () => {
-            if (isSignUpMode) {
-                // This is the "Cancel" action
-                setAuthScreenState('initial');
-            } else {
-                // This is the initial "Sign Up" click
-                setAuthScreenState('signup');
-            }
-        });
-        
-        confirmSignUpBtn.addEventListener('click', async () => {
-            const email = emailInput.value;
-            const password = passwordInput.value;
-            const confirmPassword = confirmPasswordInput.value;
-
-            if (!email || !password || !confirmPassword) {
-                showModal("Please fill out all fields.");
-                return;
-            }
-            if (password !== confirmPassword) {
-                showModal("Passwords do not match. Please re-enter.");
-                return;
-            }
-            try {
-                // Sign out of the anonymous session first
-                if (auth.currentUser) { await signOut(auth); }
-                await createUserWithEmailAndPassword(auth, email, password);
-                showModal("Account created successfully! You are now logged in.");
-                setAuthScreenState('initial');
-            } catch (error) {
-                console.error("Sign up failed:", error);
-                let message = "Sign up failed. Please try again.";
-                if (error.code === 'auth/invalid-email') {
-                    message = "Sign up failed: The email address is not valid.";
-                } else if (error.code === 'auth/weak-password') {
-                    message = "Sign up failed: The password must be at least 6 characters long.";
-                } else if (error.code === 'auth/email-already-in-use') {
-                    message = "Sign up failed: An account with this email already exists.";
-                } else if (error.code === 'auth/operation-not-allowed') {
-                    message = "Sign up failed. This can happen if the Email/Password sign-in method is not enabled in Firebase Authentication.";
-                }
-                showModal(message);
-                setAuthScreenState('initial'); // Reset UI on error
-            }
-        });
-
-        anonymousBtn.addEventListener('click', async () => {
-            try {
-                // Ensure the anonymous sign-in succeeds by signing out first
-                if (auth.currentUser) { await signOut(auth); }
-                await signInAnonymously(auth);
-                showModal("Continuing as a guest. Your results will be saved locally and on the leaderboard.");
-            } catch (error) {
-                console.error("Anonymous sign in failed:", error);
-                showModal("Could not sign in as a guest. Please try again.");
-            }
-        });
-
-        signOutBtn.addEventListener('click', async () => {
-            try {
-                await signOut(auth);
-                showModal("Signed out successfully.");
-            } catch (error) {
-                console.error("Sign out failed:", error);
-                showModal("Could not sign out. Please try again.");
-            }
-        });
-    </script>
+</script>
 </body>
 </html>
