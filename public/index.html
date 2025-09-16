@@ -262,54 +262,94 @@
         let isAuthReady = false;
         let isLoading = false; // Flag to prevent multiple rapid submissions (Moved to top-level)
 
-        // UI element references
-        const authScreen = document.getElementById('auth-screen');
-        const quizWelcomeScreen = document.getElementById('quiz-welcome-screen');
-        const userStatusDisplay = document.getElementById('user-status');
-        const userInfoEl = document.getElementById('user-info');
-        const emailInput = document.getElementById('emailInput');
-        const passwordInput = document.getElementById('passwordInput');
-        const confirmPasswordInput = document.getElementById('confirmPasswordInput');
-        const signInBtn = document.getElementById('signInBtn');
-        const signUpBtn = document.getElementById('signUpBtn');
-        const confirmSignUpBtn = document.getElementById('confirmSignUpBtn');
-        const anonymousBtn = document.getElementById('anonymousBtn');
-        const signOutBtn = document.getElementById('signOutBtn');
+// Auth UI elements
+const authScreen = document.getElementById('auth-screen');
+console.log("authScreen:", authScreen); // Add this
+const quizWelcomeScreen = document.getElementById('quiz-welcome-screen');
+console.log("quizWelcomeScreen:", quizWelcomeScreen); // Add this
+const userStatusDisplay = document.getElementById('user-status');
+console.log("userStatusDisplay:", userStatusDisplay); // Add this
+const userInfoEl = document.getElementById('user-info');
+console.log("userInfoEl:", userInfoEl); // Add this
+const emailInput = document.getElementById('emailInput');
+console.log("emailInput:", emailInput); // Add this
+const passwordInput = document.getElementById('passwordInput');
+console.log("passwordInput:", passwordInput); // Add this
+const confirmPasswordInput = document.getElementById('confirmPasswordInput');
+console.log("confirmPasswordInput:", confirmPasswordInput); // Add this
+const signInBtn = document.getElementById('signInBtn');
+console.log("signInBtn:", signInBtn); // Add this
+const signUpBtn = document.getElementById('signUpBtn');
+console.log("signUpBtn:", signUpBtn); // Add this
+const confirmSignUpBtn = document.getElementById('confirmSignUpBtn');
+console.log("confirmSignUpBtn:", confirmSignUpBtn); // Add this
+const anonymousBtn = document.getElementById('anonymousBtn');
+console.log("anonymousBtn:", anonymousBtn); // Add this
+const signOutBtn = document.getElementById('signOutBtn');
+console.log("signOutBtn:", signOutBtn); // Add this
 
-        // Main Quiz UI elements
-        const quizScreen = document.getElementById('quiz-screen');
-        const resultScreen = document.getElementById('result-screen');
-        const startQuizBtn = document.getElementById('start-quiz-btn');
-        const nextBtn = document.getElementById('next-btn'); // Assuming this is for question navigation
-        const quizQuestionEl = document.getElementById('quiz-question'); // Where the question text goes
-        const quizAnswersEl = document.getElementById('quiz-answers'); // Container for answer options
-        const quizContainer = document.getElementById('quiz-container'); // If you have a general container for the quiz UI
-        const prevQuestionBtn = document.getElementById('prev-question-btn');
-        const submitQuizBtn = document.getElementById('submit-quiz-btn');
-        const currentQuestionSpan = document.getElementById('current-question'); // For "X of Y"
-        const totalQuestionsSpan = document.getElementById('total-questions'); // For "X of Y"
+// Main Quiz UI elements
+const quizScreen = document.getElementById('quiz-screen');
+console.log("quizScreen:", quizScreen); // Add this
+const resultScreen = document.getElementById('result-screen');
+console.log("resultScreen:", resultScreen); // Add this
+const startQuizBtn = document.getElementById('start-quiz-btn');
+console.log("startQuizBtn:", startQuizBtn); // Add this
+const nextBtn = document.getElementById('next-btn');
+console.log("nextBtn:", nextBtn); // Add this
+const quizQuestionEl = document.getElementById('quiz-question');
+console.log("quizQuestionEl:", quizQuestionEl); // Add this
+const quizAnswersEl = document.getElementById('quiz-answers');
+console.log("quizAnswersEl:", quizAnswersEl); // Add this
+const quizContainer = document.getElementById('quiz-container');
+console.log("quizContainer:", quizContainer); // Add this
+const prevQuestionBtn = document.getElementById('prev-question-btn');
+console.log("prevQuestionBtn:", prevQuestionBtn); // Add this
+const submitQuizBtn = document.getElementById('submit-quiz-btn');
+console.log("submitQuizBtn:", submitQuizBtn); // Add this
+const currentQuestionSpan = document.getElementById('current-question');
+console.log("currentQuestionSpan:", currentQuestionSpan); // Add this
+const totalQuestionsSpan = document.getElementById('total-questions');
+console.log("totalQuestionsSpan:", totalQuestionsSpan); // Add this
+// ... continue for all document.getElementById calls ...
 
-        // Loading, Modal & Result UI elements (Please ensure these IDs exist in your HTML!)
-        const loadingScreen = document.getElementById('loading-screen'); // This MUST exist in your HTML
-        const modal = document.getElementById('modal');
-        const modalMessage = document.getElementById('modal-message');
-        const modalCloseBtn = document.getElementById('modal-close-btn');
-        const resultContainer = document.getElementById('result-container'); // This MUST exist in your HTML
-        const resultContentEl = document.getElementById('result-content'); // Display Gemini result here
-        const restartQuizBtn = document.getElementById('restart-btn'); // Matches your 'restartBtn' from your snippet
-    
-        // Multiplayer UI elements (Please ensure these IDs exist in your HTML!)
-        const userIdDisplay = document.getElementById('userIdDisplay');
-        const copyIdBtn = document.getElementById('copyIdBtn');
-        const leaderboardList = document.getElementById('leaderboard-list');
-        const friendIdInput = document.getElementById('friendIdInput');
-        const findFriendBtn = document.getElementById('findFriendBtn');
-        const friendResultDisplay = document.getElementById('friendResultDisplay');
-        const multiplayerSection = document.getElementById('multiplayer-section');
+// Loading, Modal & Result UI elements
+const loadingScreen = document.getElementById('loading-screen');
+console.log("loadingScreen:", loadingScreen); // Add this
+const modal = document.getElementById('modal');
+console.log("modal:", modal); // Add this
+const modalMessage = document.getElementById('modal-message');
+console.log("modalMessage:", modalMessage); // Add this
+const modalCloseBtn = document.getElementById('modal-close-btn');
+console.log("modalCloseBtn:", modalCloseBtn); // Add this
+const resultContainer = document.getElementById('result-container');
+console.log("resultContainer:", resultContainer); // Add this
+const resultContentEl = document.getElementById('result-content');
+console.log("resultContentEl:", resultContentEl); // Add this
+const restartQuizBtn = document.getElementById('restart-btn');
+console.log("restartQuizBtn:", restartQuizBtn); // Add this
 
-        // Other UI elements (from your snippet)
-        const darkModeToggle = document.getElementById('dark-mode-toggle');
-        const appTitle = document.getElementById('app-title');
+// Multiplayer UI elements
+const userIdDisplay = document.getElementById('userIdDisplay');
+console.log("userIdDisplay:", userIdDisplay); // Add this
+const copyIdBtn = document.getElementById('copyIdBtn');
+console.log("copyIdBtn:", copyIdBtn); // Add this
+const leaderboardList = document.getElementById('leaderboard-list');
+console.log("leaderboardList:", leaderboardList); // Add this
+const friendIdInput = document.getElementById('friendIdInput');
+console.log("friendIdInput:", friendIdInput); // Add this
+const findFriendBtn = document.getElementById('findFriendBtn');
+console.log("findFriendBtn:", findFriendBtn); // Add this
+const friendResultDisplay = document.getElementById('friendResultDisplay');
+console.log("friendResultDisplay:", friendResultDisplay); // Add this
+const multiplayerSection = document.getElementById('multiplayer-section');
+console.log("multiplayerSection:", multiplayerSection); // Add this
+
+// Other UI elements
+const darkModeToggle = document.getElementById('dark-mode-toggle');
+console.log("darkModeToggle:", darkModeToggle); // Add this
+const appTitle = document.getElementById('app-title');
+console.log("appTitle:", appTitle); // Add this
 
         // --- Quiz Data and State ---
         let currentQuestionIndex = 0;
