@@ -212,7 +212,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 
         // IMPORTANT: Log level for debugging Firestore issues.
         setLogLevel('Debug');
@@ -231,6 +232,7 @@ const firebaseConfig = {
         // --- Firebase Initialization and Authentication ---
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const functions = getFunctions(app);
         const auth = getAuth(app);
         let userId;
         let isAuthReady = false;
@@ -456,182 +458,91 @@ if (modalCloseBtn) {
         }
         
         async function endQuizAndProcessAnswers() {
-            if (isLoading) return;
-            isLoading = true;
-            
-            // Scroll to the top of the page before showing the loading screen
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (isLoading) return;
+    isLoading = true;
+    hideQuiz();
+    displayLoadingAnimation();
 
-            // Switch screens and display the loading spinner immediately
-            quizScreen.classList.add('hidden');
-            resultScreen.classList.remove('hidden');
+    const userAnswers = selectedAnswers.filter(answer => answer !== undefined);
+    const userId = auth.currentUser ? auth.currentUser.uid : null;
 
-            resultContentEl.innerHTML = `
-                <div class="flex flex-col items-center justify-center">
-                    <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <p class="mt-4 text-white">Summoning your inner Drakkaen Nakkla...</p>
-                    <p class="mt-2 text-sm text-gray-300">Please wait while we process your answers.</p>
-                </div>
-            `;
-        
-            try {
-                if (!userId) {
-                    showModal("Authentication not ready. Please wait and try again.");
-                    isLoading = false;
-                    return;
-                }
-                const systemPrompt = `You are a mystical loremaster from the world of Oram, tasked with determining a person's inner Drakkaen Nakkla based on their personality and choices. You have a deep understanding of the twelve core Drakkaen Nakkla, partially informed by Decoz numerology:
-                
-                - Qat (Book 1 Catching Qat): Life Path Number 6; Personality 1; Expression 6; Heart’s Desire 5. Qat is an assassin and thief (and twin to Qrow) and uses ae/aer/aem pronouns. Ae has no memory before eleven years old when ae was abducted by the pirate Captain Rogen. Ae grew up on the pirate ship, continuing to hone skills ae didn't know ae had - wielding and fighting with a knife and whip, and pickpocketing. Trademark moves are stripping aer opponent by slicing buttons, ties, etc. from their clothing. Qat often uses dice to make decisions (even important ones). Qat has never had magic, but lately, it seems ae can use "harpoon thoughts" that are implanted in other people’s minds. Qat has been on the run from Captain Rogen since ae assassinated Rogen’s first mate over a decade ago. Qat has recently met aer brother, Qrow, and has mixed feelings about it. Ae thought that by not known aer past, ae made aerself, but is now learning that many of the things ae did well were things ae did before the amnesia.
-                - Qrow (Book 1 Catching Qat): Life Path Number 6; Personality 8; Expression 9; Heart’s Desire 1. Qrow’s mother was killed in front of him at age 11, and his twin (Qat) was taken. He was then abandoned by his people (a traveling troupe) and left alone in a strange city. He formed a street gang of spies and eventually became one of the richest men on the continent. He has spent most of his life searching for his twin. He uses psychic magic through sound and vibrations from his vocal chords, which are layered around and through his speech. He learned the skill from his mother and honed it in the boardroom, learning how to affect emotions, glean motivations, and manipulate actions. He has recently found his twin, and must now find a new life goal. He fell in love with Doscia, who at the time was an up-and-coming athlete. She broke up with him to follow her career, and now he is somewhat jaded by love and is determined to be a philandering bachelor.
-                - Llani (Book 2 Legacies): Life Path Number 8; Personality 4; Expression 2; Heart’s Desire 7. Llani appears in the first book. She is an elf with innate magic, which she can't always control. She was not given access to advanced texts by her instructors for fear that she would destroy them by accident. She is (by a genetic mutation) the only one of her species that is a completely different color (purple). It has been her goal to discover who her father is and the reason for the mutation. Her subspecies of elves live within the trees. They can "talk" to trees, manipulate wood, etc. Because of a mutation at birth, she can also extract energy from living beings like plants and animals and use it to heal herself or others. She spends most of her time reading and studying.
-                - Akin (Book 2 Legacies): Life Path Number 2; Personality 6; Expression 8; Heart’s Desire 2. Akin appears in the first book. He cannot speak due to an injury to his throat at birth. Although he was born part ukulu, who shun magic, he has innate elemental magic that he accesses by gathering energy by way of idjame, a form of martial arts. He doesn’t know his father and was raised by a missionary woman he calls his aunt, who knows Akin’s father. Akin speaks using sign language. He can separate his soul from his body and astrally project. He grew up with severe abdominal pain, and uses the pain as a focus, both for control and with his magic. When he is soul soaring, most people believe he is meditating. He is the best fighter in the group and trains them in drills and maneuvers.
-                - Doscia (Book 3): Life Path Number 2; Personality 4; Expression 9; Heart’s Desire 5. Doscia appears in the first book. She is a daga (imagine a doglike humanoid creature), mixed with danaash (like a human), elf, and faerie. She trained as a long-distance athlete but joined the academy and is a rookie investigator. She has great instincts. When given a choice of a relationship (with Qrodin) or a career, she chose her career. She loves the color pink.
-                - Aamkyaap (Book 3): Life Path Number 6; Personality 5; Expression 7; Heart’s Desire 2. He is the prince of the Merkama (an underwater species like merman). He suspected someone close to his mother, the queen, was stealing artifacts. That person changed him into a seahorse (when in water) and a horse (when on land). In either body, he cannot speak except through body language. He left home for fear of his life. Although we are introduced to Aamkyaap, we don’t realize it because he goes by another name. We will understand who he is in Book 3.
-                - Bell (Book 4): Life Path Number 5 Personality 4; Expression 3; Heart’s Desire 8. Bell appears in the first book. She is a hablis (imagine a hobbit) who can track, shoot a bow, hunt, and cook. Her family lives in clans and mostly farms. Hablis have a deep understanding of all things farming, natural irrigation, food, etc. She's farsighted but doesn't wear glasses because she lacks confidence. She leaves home because she’s in love with her best friend, who just became engaged to someone else. She is very messy (clothes are always stained), but she loves everyone and empathizes easily. She is excited by new opportunities and quite endearing. The only magic that Bell has is in naming things. Every time she names something, it is enhanced in some way.
-                - Kasaandra (Book 4): Life Path Number 3; Personality 4; Expression 1; Heart’s Desire 6. Kassandra appears in the first book. Unlike her family (paternal side are blacksmiths and maternal side are bakers), she uses a battleaxe instead of a hammer during battle. Within Dwarf Mountain, there are traditional gender professions, and she has been discouraged from being a bladesmith, but it's all she wants to do. As a child, she also learned to tame baby giant spiders and harvest their spider silk. This feat (unknown to the rest of the team) was quite lucrative since items made with the silk are lighter and stronger than any other cloth. She isn't scholarly, but she can visualize how things work and break them down into simple parts. She often solves problems by using the simplest method possible. She's industrious, always working, and despises Llani's tendency to read. She's very loyal and trustworthy. She LOVES food (especially Bell's) and can be quite grumpy when hot. She and Akin are friends.
-                - Nightshade (Book 5): Life Path Number 4; Personality 3; Expression 4; Heart’s Desire 1. Nightshade appears in the first book. She is a faerie. Most creatures cannot see faeries, but the Drakkaen Nakkla can. This is very upsetting to her. Her father is the most notorious Assassin on the continent, Kish. She is following in his footsteps and is an assassin. She and Qat met as competitors for the same contract hit. Nightshade won. She can shrink herself. She is a bit of a troublemaker, but in a fun way. She and Qat are reluctant friends. She wants to get away from the faerie guild and thinks Qat is her way to escape.
-                - Jherdi (Book 5): Life Path Number 5 Personality 7; Expression 5; Heart’s Desire 7. Jherdi is an outcast by choice because he craves the freedom to do what he wants, when he wants. He lost a close friend to a demon and is determined to exact revenge. He successfully stalks the demon’s lair, a series of caves and winding tunnels. We don’t meet Jherdi until Book 2 Legacies.
-                - Xarie (Book 6): Life Path Number 2; Personality 3; Expression 9; Heart’s Desire 6. Xarie appears in the first book, but we don’t realize it. We will know him by name in book 2 Legacies. He is born underwater in a sunken ship and rescued by Bell, who keeps his presence a secret.
-                - Taughban (Book 6): Life Path Number 9 Personality 7; Expression 5; Heart’s Desire 7. The third of his name because his two oldest brothers were born with the same name and died before he was born. He has been listening to his father’s stories about the Drakkaen Nakkla and believes his destiny is to join the fight against dragons when they return on Darkest Night. His older sister is Kasaandra, whom he barely knows since she left home when he was very young. He senses that she doesn't like him and doesn't know why.
-
-                
-                The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
-        
-
-                const userQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
-                
-                // --- OLD GEMINI API PREPARATION (NOW COMMENTED OUT) ---
-                // const apiKey = ""; // Leave this as-is
-                // const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-                //
-                // const payload = {
-                //     contents: [{ parts: [{ text: userQuery }] }],
-                //     systemInstruction: {
-                //         parts: [{ text: systemPrompt }]
-                //     },
-                // };
-                //
-                // let response;
-                // let retries = 0;
-                // const maxRetries = 3;
-                // while (retries < maxRetries) {
-                //     try {
-                //         response = await fetch(apiUrl, {
-                //             method: 'POST',
-                //             headers: { 'Content-Type': 'application/json' },
-                //             body: JSON.stringify(payload)
-                //         });
-                //         if (response.ok) {
-                //             break; // Success! Exit the retry loop
-                //         } else {
-                //             throw new Error(`API Error: ${response.statusText}`);
-                //         }
-                //     } catch (error) {
-                //         console.error(`Attempt ${retries + 1} failed:`, error);
-                //         retries++;
-                //         if (retries < maxRetries) {
-                //             const delay = Math.pow(2, retries) * 1000;
-                //             await new Promise(res => setTimeout(res, delay));
-                //         }
-                //     }
-                // }
-                //
-                // if (!response || !response.ok) {
-                //     throw new Error("Failed to get a response from the API after multiple retries.");
-                // }
-                //
-                // const result = await response.json();
-                // const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-                // 
-                // if (!text) {
-                //     throw new Error("Failed to retrieve text from the Gemini API response.");
-                // }
-                // --- END OLD GEMINI API CALL ---
-                //
-                // --- NEW TEMPORARY PLACEHOLDER LOGIC ---
-                console.warn("Gemini API call is currently bypassed. Using a placeholder result for testing.");
-                const result = {
-                    candidates: [{
-                        content: {
-                            parts: [{ text: "**Qat** (Book 1 Catching Qat)\n\nYou exhibit a resourceful and adaptable nature, often making swift decisions and learning new skills quickly. Your approach to challenges is practical, even if it leads to a bit of mischief, and you possess an underlying intuition that guides your path. Much like Qat, you are shaped by experience and always ready for the next adventure." }]
-                        }
-                    }]
-                };
-                const text = result.candidates[0].content.parts[0].text;
-                // --- END NEW TEMPORARY PLACEHOLDER LOGIC ---
-                
-                resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
-                displayModal(text, 'success');
-        
-                    // --- NEW CODE: Firestore Write Operations ---
-            // Ensure userId is available (checked at the start of the function)
-            if (userId) {
-                // 1. Save to the user's private quiz results collection
-                const userQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/users/${userId}/quizResults`);
-                await addDoc(userQuizResultsCollectionRef, {
-                    timestamp: new Date().toISOString(), // Store timestamp as an ISO string
-                    characterResult: text, // The character analysis
-                    answers: userAnswers,  // The raw answers from the quiz
-                    // No need for userId here as it's already in the path
-                });
-                console.log("Quiz result saved to user's private collection in Firestore.");
-
-                // 2. Save to the public quiz results collection for the leaderboard
-                const publicQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
-                await addDoc(publicQuizResultsCollectionRef, {
-                    timestamp: new Date().toISOString(),
-                    characterResult: text, // The character analysis
-                    userId: userId,        // Include userId for the public display
-                });
-                console.log("Quiz result saved to public collection for leaderboard.");
-            } else {
-                console.warn("User not authenticated, skipping Firestore save for quiz results.");
-                displayModal("Quiz completed, but login required to save results!", 'warning');
-            }
-            // --- END NEW CODE ---
-                // Save to private collection
-                // const privateResultsCollection = collection(db, `artifacts/${appId}/users/${userId}/quizResults`);
-                // await addDoc(privateResultsCollection, {
-                //     userId: userId,
-                //     answers: userAnswers,
-                //     characterResult: text,
-                //     timestamp: new Date().toISOString(),
-                //     rawApiResponse: result
-                // });
-                //
-                // Save to public collection
-                // const publicResultsCollection = collection(db, `artifacts/${appId}/public/data/quizResults`);
-                // await addDoc(publicResultsCollection, {
-                //     userId: userId,
-                //     characterResult: text,
-                //     timestamp: new Date().toISOString()
-                // });
-                //
-                // const markdownContent = text.trim();
-                // const [characterLine, ...descriptionLines] = markdownContent.split('\n');
-                // const characterName = characterLine.replace(/\*\*/g, ''); // Remove bold markdown
-                // const characterDescription = descriptionLines.join('\n').trim();
-                //
-                // resultContentEl.innerHTML = `
-                //    <p class="font-bold text-3xl quiz-result-name">${characterName}</p>
-                //    <p class="text-sm mt-4" style="color: #cccccc;">${characterDescription}</p>
-                //`;
-                //    
-                // Show multiplayer section
-                // userIdDisplay.textContent = userId;
-                // multiplayerSection.classList.remove('hidden');
-
-            } catch (error) {
-                console.error("Error processing quiz:", error);
-                displayModal(`Error processing quiz: ${error.message}`, 'error');
-            } finally {
-                isLoading = false;
-            }
+    try {
+        if (!userId) {
+            showModal("Authentication not ready. Please wait and try again.");
+            isLoading = false;
+            return;
         }
+
+        const systemPrompt = `You are a mystical loremaster from the world of Oram, tasked with determining a person's inner Drakkaen Nakkla based on their personality and choices. You have a deep understanding of the twelve core Drakkaen Nakkla, partially informed by Decoz numerology:
+            
+            - Qat (Book 1 Catching Qat): Life Path Number 6; Personality 1; Expression 6; Heart’s Desire 5. Qat is an assassin and thief (and twin to Qrow) and uses ae/aer/aem pronouns. Ae has no memory before eleven years old when ae was abducted by the pirate Captain Rogen. Ae grew up on the pirate ship, continuing to hone skills ae didn't know ae had - wielding and fighting with a knife and whip, and pickpocketing. Trademark moves are stripping aer opponent by slicing buttons, ties, etc. from their clothing. Qat often uses dice to make decisions (even important ones). Qat has never had magic, but lately, it seems ae can use "harpoon thoughts" that are implanted in other people’s minds. Qat has been on the run from Captain Rogen since ae assassinated Rogen’s first mate over a decade ago. Qat has recently met aer brother, Qrow, and has mixed feelings about it. Ae thought that by not known aer past, ae made aerself, but is now learning that many of the things ae did well were things ae did before the amnesia.
+            - Qrow (Book 1 Catching Qat): Life Path Number 6; Personality 8; Expression 9; Heart’s Desire 1. Qrow’s mother was killed in front of him at age 11, and his twin (Qat) was taken. He was then abandoned by his people (a traveling troupe) and left alone in a strange city. He formed a street gang of spies and eventually became one of the richest men on the continent. He has spent most of his life searching for his twin. He uses psychic magic through sound and vibrations from his vocal chords, which are layered around and through his speech. He learned the skill from his mother and honed it in the boardroom, learning how to affect emotions, glean motivations, and manipulate actions. He has recently found his twin, and must now find a new life goal. He fell in love with Doscia, who at the time was an up-and-coming athlete. She broke up with him to follow her career, and now he is somewhat jaded by love and is determined to be a philandering bachelor.
+            - Llani (Book 2 Legacies): Life Path Number 8; Personality 4; Expression 2; Heart’s Desire 7. Llani appears in the first book. She is an elf with innate magic, which she can't always control. She was not given access to advanced texts by her instructors for fear that she would destroy them by accident. She is (by a genetic mutation) the only one of her species that is a completely different color (purple). It has been her goal to discover who her father is and the reason for the mutation. Her subspecies of elves live within the trees. They can "talk" to trees, manipulate wood, etc. Because of a mutation at birth, she can also extract energy from living beings like plants and animals and use it to heal herself or others. She spends most of her time reading and studying.
+            - Akin (Book 2 Legacies): Life Path Number 2; Personality 6; Expression 8; Heart’s Desire 2. Akin appears in the first book. He cannot speak due to an injury to his throat at birth. Although he was born part ukulu, who shun magic, he has innate elemental magic that he accesses by gathering energy by way of idjame, a form of martial arts. He doesn’t know his father and was raised by a missionary woman he calls his aunt, who knows Akin’s father. Akin speaks using sign language. He can separate his soul from his body and astrally project. He grew up with severe abdominal pain, and uses the pain as a focus, both for control and with his magic. When he is soul soaring, most people believe he is meditating. He is the best fighter in the group and trains them in drills and maneuvers.
+            - Doscia (Book 3): Life Path Number 2; Personality 4; Expression 9; Heart’s Desire 5. Doscia appears in the first book. She is a daga (imagine a doglike humanoid creature), mixed with danaash (like a human), elf, and faerie. She trained as a long-distance athlete but joined the academy and is a rookie investigator. She has great instincts. When given a choice of a relationship (with Qrodin) or a career, she chose her career. She loves the color pink.
+            - Aamkyaap (Book 3): Life Path Number 6; Personality 5; Expression 7; Heart’s Desire 2. He is the prince of the Merkama (an underwater species like merman). He suspected someone close to his mother, the queen, was stealing artifacts. That person changed him into a seahorse (when in water) and a horse (when on land). In either body, he cannot speak except through body language. He left home for fear of his life. Although we are introduced to Aamkyaap, we don’t realize it because he goes by another name. We will understand who he is in Book 3.
+            - Bell (Book 4): Life Path Number 5 Personality 4; Expression 3; Heart’s Desire 8. Bell appears in the first book. She is a hablis (imagine a hobbit) who can track, shoot a bow, hunt, and cook. Her family lives in clans and mostly farms. Hablis have a deep understanding of all things farming, natural irrigation, food, etc. She's farsighted but doesn't wear glasses because she lacks confidence. She leaves home because she’s in love with her best friend, who just became engaged to someone else. She is very messy (clothes are always stained), but she loves everyone and empathizes easily. She is excited by new opportunities and quite endearing. The only magic that Bell has is in naming things. Every time she names something, it is enhanced in some way.
+            - Kasaandra (Book 4): Life Path Number 3; Personality 4; Expression 1; Heart’s Desire 6. Kassandra appears in the first book. Unlike her family (paternal side are blacksmiths and maternal side are bakers), she uses a battleaxe instead of a hammer during battle. Within Dwarf Mountain, there are traditional gender professions, and she has been discouraged from being a bladesmith, but it's all she wants to do. As a child, she also learned to tame baby giant spiders and harvest their spider silk. This feat (unknown to the rest of the team) was quite lucrative since items made with the silk are lighter and stronger than any other cloth. She isn't scholarly, but she can visualize how things work and break them down into simple parts. She often solves problems by using the simplest method possible. She's industrious, always working, and despises Llani's tendency to read. She's very loyal and trustworthy. She LOVES food (especially Bell's) and can be quite grumpy when hot. She and Akin are friends.
+            - Nightshade (Book 5): Life Path Number 4; Personality 3; Expression 4; Heart’s Desire 1. Nightshade appears in the first book. She is a faerie. Most creatures cannot see faeries, but the Drakkaen Nakkla can. This is very upsetting to her. Her father is the most notorious Assassin on the continent, Kish. She is following in his footsteps and is an assassin. She and Qat met as competitors for the same contract hit. Nightshade won. She can shrink herself. She is a bit of a troublemaker, but in a fun way. She and Qat are reluctant friends. She wants to get away from the faerie guild and thinks Qat is her way to escape.
+            - Jherdi (Book 5): Life Path Number 5 Personality 7; Expression 5; Heart’s Desire 7. Jherdi is an outcast by choice because he craves the freedom to do what he wants, when he wants. He lost a close friend to a demon and is determined to exact revenge. He successfully stalks the demon’s lair, a series of caves and winding tunnels. We don’t meet Jherdi until Book 2 Legacies.
+            - Xarie (Book 6): Life Path Number 2; Personality 3; Expression 9; Heart’s Desire 6. Xarie appears in the first book, but we don’t realize it. We will know him by name in book 2 Legacies. He is born underwater in a sunken ship and rescued by Bell, who keeps his presence a secret.
+            - Taughban (Book 6): Life Path Number 9 Personality 7; Expression 5; Heart’s Desire 7. The third of his name because his two oldest brothers were born with the same name and died before he was born. He has been listening to his father’s stories about the Drakkaen Nakkla and believes his destiny is to join the fight against dragons when they return on Darkest Night. His older sister is Kasaandra, whom he barely knows since she left home when he was very young. He senses that she doesn't like him and doesn't know why.
+
+            
+            The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
+    
+
+        const userQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
+        
+        // --- NEW CODE: Call the Cloud Function for Gemini analysis ---
+        console.log("Calling Cloud Function for Gemini analysis...");
+        const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
+        
+        const resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers });
+        const geminiResultText = resultFromCloudFunction.data.analysis;
+        
+        const text = geminiResultText; // This is where the result is assigned
+
+        // --- END NEW CODE: Call the Cloud Function ---
+        
+        // This is the ONLY place where the result should be displayed and saved
+        resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
+        displayModal(text, 'success');
+
+        // --- Firestore Write Operations ---
+        if (userId) {
+            // 1. Save to the user's private quiz results collection
+            const userQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/users/${userId}/quizResults`);
+            await addDoc(userQuizResultsCollectionRef, {
+                timestamp: new Date().toISOString(),
+                characterResult: text,
+                answers: userAnswers,
+            });
+            console.log("Quiz result saved to user's private collection in Firestore.");
+
+            // 2. Save to the public quiz results collection for the leaderboard
+            const publicQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
+            await addDoc(publicQuizResultsCollectionRef, {
+                timestamp: new Date().toISOString(),
+                characterResult: text,
+                userId: userId,
+            });
+            console.log("Quiz result saved to public collection for leaderboard.");
+        } else {
+            console.warn("User not authenticated, skipping Firestore save for quiz results.");
+            displayModal("Quiz completed, but login required to save results!", 'warning');
+        }
+
+    } catch (error) {
+        console.error("Error processing quiz:", error);
+        showModal(`An error occurred: ${error.message || "Please try again."}`);
+    } finally {
+        isLoading = false;
+        hideLoadingAnimation();
+        quizContainer.style.display = 'none'; // Ensure quiz is hidden
+        resultContainer.style.display = 'block'; // Show result container
+    }
+}
         
         // Sets up a real-time listener for the public leaderboard
         function setupLeaderboardListener() {
