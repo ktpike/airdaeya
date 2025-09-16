@@ -575,12 +575,12 @@
 
     // --- EVENT LISTENERS ---
     // Start Quiz Button
-    if (quizStartBtn) {
-        quizStartBtn.addEventListener('click', () => {
+    if (startQuizBtn) { // <--- Changed from 'quizStartBtn'
+        startQuizBtn.addEventListener('click', () => { // <--- Changed from 'quizStartBtn'
             quizWelcomeScreen.style.display = 'none';
-            if (quizScreen) quizScreen.style.display = 'block'; // Use quizScreen
+            if (quizScreen) quizScreen.style.display = 'block';
             currentQuestionIndex = 0;
-            userAnswers = []; // Reset userAnswers
+            userAnswers = [];
             displayQuestion();
         });
     }
