@@ -531,7 +531,7 @@
             currentQuestionSpan.textContent = currentQuestionIndex + 1;
             totalQuestionsSpan.textContent = quizQuestions.length; // Using quizQuestions
             prevQuestionBtn.disabled = currentQuestionIndex === 0;
-            nextBtn.disabled = currentQuestionIndex === quizQuestions.length - 1; // Using nextBtn
+            nextBtn.disabled = currentQuestionIndex === quizQuestions.length - 1; // Add this line
             submitQuizBtn.style.display = currentQuestionIndex === quizQuestions.length - 1 ? 'block' : 'none';
         }
     }
@@ -574,9 +574,6 @@
 
                 
                 The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
-        
-
-            const quizUserQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`; // Changed to quizUserQuery
             
             console.log("DEBUG: Calling Cloud Function. Current userAuthId:", userAuthId);
             if (auth.currentUser) {
@@ -591,7 +588,7 @@
             console.log("Calling Cloud Function for Gemini analysis...");
             const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
             
-            const resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers, systemPrompt: systemPrompt, userQuery: userQuery });
+            // CORRECTED PAYLOAD: Only pass userAnswers and systemPrompt from client
             const geminiResultText = resultFromCloudFunction.data.analysis;
             
             const text = geminiResultText; 
