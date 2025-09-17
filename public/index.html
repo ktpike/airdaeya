@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Airdaeya: Character Quiz</title>
         <!-- Favicon -->
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/png" href="/favicon.ico/favicon-96x96.png" sizes="96x96" />
     <!-- Google Fonts for a custom fantasy look -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -56,18 +56,47 @@
             color: #cccccc;
         }
 
-        .answer-button {
+        .answer-option {
             transition: all 0.2s ease-in-out;
             cursor: pointer;
-        }
-        
-        .answer-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            /* --- ADD THESE STYLES --- */
+            display: block; /* Make them block-level to stack vertically */
+            width: 100%; /* Make them fill the available width */
+            padding: 0.75rem 1.5rem; /* Add generous padding */
+            border-radius: 0.5rem; /* Slightly rounded corners */
+            background-color: rgba(124, 105, 64, 0.7); /* Match card background with transparency */
+            color: #ffffff; /* White text for contrast */
+            margin-bottom: 0.5rem; /* Space between options */
+            border: 1px solid transparent; /* Default border */
+            /* --- END ADDED STYLES --- */
         }
 
-        .answer-button.selected {
-            border: 2px solid #500041;
+        .answer-option:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            /* --- ADD THIS (lighter background on hover) --- */
+            background-color: rgba(124, 105, 64, 0.9);
+        }
+
+        .answer-option.selected {
+            border: 2px solid #500041; /* This will now apply! */
+            /* --- ADD THIS (lighter background when selected) --- */
+            background-color: rgba(124, 105, 64, 0.9);
+        }
+
+        /* Ensure dark mode styles are also applied for answer options */
+        body.dark-mode .answer-option {
+            background-color: rgba(80, 0, 65, 0.7); /* Dark mode background */
+            color: #cccccc;
+        }
+
+        body.dark-mode .answer-option:hover {
+            background-color: rgba(80, 0, 65, 0.9); /* Dark mode hover background */
+        }
+
+        body.dark-mode .answer-option.selected {
+            border: 2px solid #00500f; /* Dark mode selected border (adjust color if needed) */
+            background-color: rgba(80, 0, 65, 0.9);
         }
 
         .modal {
@@ -656,7 +685,7 @@
             localStorage.setItem('theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
         });
     }
-    
+
     // Modal Close Button
     if (modalCloseBtn) {
         modalCloseBtn.addEventListener('click', closeModal); // Your existing event listener
