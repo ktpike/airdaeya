@@ -549,6 +549,10 @@
 
         const userAuthId = auth.currentUser ? auth.currentUser.uid : null; // Renamed to avoid confusion with top-level userId
 
+        let resultFromCloudFunction; 
+        let geminiResultText;
+        let text; // text also needs to be declared here
+
         try {
             if (!userAuthId) { // Check for userAuthId
                 displayModal("Authentication not ready. Please wait and try again.", 'warning'); // Use displayModal
@@ -588,10 +592,11 @@
             console.log("Calling Cloud Function for Gemini analysis...");
             const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
             
-            // CORRECTED PAYLOAD: Only pass userAnswers and systemPrompt from client
-            const geminiResultText = resultFromCloudFunction.data.analysis;
+            // Assign to the already-declared variable
+            resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers, systemPrompt: systemPrompt });
+            geminiResultText = resultFromCloudFunction.data.analysis;
             
-            const text = geminiResultText; 
+            text = geminiResultText; // Assign to the already-declared variable
             // --- END NEW CODE: Call the Cloud Function ---
             
             resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
