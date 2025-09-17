@@ -20,7 +20,7 @@
             justify-content: center;
             padding: 1rem;
             /* Hardcoded background image from the provided URL */
-            background-image: url('https://ktpike.wordpress.com/wp-content/uploads/2025/09/gemini_generated_image_hgiwplhgiwplhgiw.png');
+            background-image: url('https://ktpike.wordpress.com/wp-content/uploads/2025/09/ktpwallpaper.png');
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -301,8 +301,6 @@ const quizQuestionEl = document.getElementById('quiz-question');
 console.log("quizQuestionEl:", quizQuestionEl); // Add this
 const quizAnswersEl = document.getElementById('quiz-answers');
 console.log("quizAnswersEl:", quizAnswersEl); // Add this
-const quizContainer = document.getElementById('quiz-container');
-console.log("quizContainer:", quizContainer); // Add this
 const prevQuestionBtn = document.getElementById('prev-question-btn');
 console.log("prevQuestionBtn:", prevQuestionBtn); // Add this
 const submitQuizBtn = document.getElementById('submit-quiz-btn');
@@ -322,8 +320,6 @@ const modalMessage = document.getElementById('modal-message');
 console.log("modalMessage:", modalMessage); // Add this
 const modalCloseBtn = document.getElementById('modal-close-btn');
 console.log("modalCloseBtn:", modalCloseBtn); // Add this
-const resultContainer = document.getElementById('result-container');
-console.log("resultContainer:", resultContainer); // Add this
 const resultContentEl = document.getElementById('result-content');
 console.log("resultContentEl:", resultContentEl); // Add this
 const restartQuizBtn = document.getElementById('restart-btn');
@@ -471,8 +467,8 @@ console.log("appTitle:", appTitle); // Add this
         // Use quizScreen if that's the main quiz wrapper
         if (quizScreen) { 
             quizScreen.style.display = 'none';
-        } else if (quizContainer) { // Fallback if quizContainer is used for the entire quiz section
-            quizContainer.style.display = 'none';
+        } else if (quizScreen) { // Fallback if quizScreen is used for the entire quiz section
+            quizScreen.style.display = 'none';
         }
     }
 
