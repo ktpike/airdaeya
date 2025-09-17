@@ -578,11 +578,20 @@
 
             const quizUserQuery = `My answers to the Airdaeya quiz are:\n\n${userAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`; // Changed to quizUserQuery
             
+            console.log("DEBUG: Calling Cloud Function. Current userAuthId:", userAuthId);
+            if (auth.currentUser) {
+                const idTokenResult = await auth.currentUser.getIdTokenResult();
+                console.log("DEBUG: Current user has ID Token:", !!idTokenResult.token); // Checks if token string is present
+                console.log("DEBUG: ID Token expiration time:", new Date(idTokenResult.expirationTime).toLocaleString());
+            } else {
+                console.log("DEBUG: auth.currentUser is NULL just before callable function call.");
+            }
+
             // --- NEW CODE: Call the Cloud Function for Gemini analysis ---
             console.log("Calling Cloud Function for Gemini analysis...");
             const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
             
-            const resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers });
+            const resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers, systemPrompt: systemPrompt, userQuery: userQuery });
             const geminiResultText = resultFromCloudFunction.data.analysis;
             
             const text = geminiResultText; 
