@@ -816,80 +816,56 @@ h1.character-detail-name {
     gap: 10px;
 }
 
-/* =================================================================================
-   Mobile Responsive Fixes
-   ================================================================================= */
+/* --- Download Buttons --- */
+.download-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 25px;
+    flex-wrap: wrap;
+}
+
+.download-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--font-header);
+    font-size: 1em;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+    min-width: 200px;
+}
+
+.download-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.pdf-btn {
+    background: linear-gradient(135deg, var(--primary-color), #6b3a6b);
+    color: #FFD700;
+    border: 1px solid rgba(255,215,0,0.3);
+}
+
+.share-btn {
+    background: linear-gradient(135deg, #B8860B, #DAA520);
+    color: #2d2e49;
+    font-weight: bold;
+}
+
+.download-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
 
 @media (max-width: 480px) {
-    /* Stack quiz nav buttons vertically on narrow screens */
-    .quiz-navigation {
+    .download-buttons {
         flex-direction: column;
-        gap: 10px;
+        align-items: center;
     }
-
-    .quiz-nav-button {
+    .download-btn {
         width: 100%;
-        text-align: center;
     }
-
-    /* Shrink quiz question font on mobile */
-    .quiz-container .quiz-question-text {
-        font-size: 1.3em;
-    }
-
-    /* Make answer buttons easier to tap */
-    .quiz-answer-button {
-        padding: 18px 15px;
-        font-size: 1em;
-    }
-
-    /* Shrink match portrait on mobile */
-    .match-portrait {
-        width: 150px;
-        height: 150px;
-    }
-
-    /* Shrink character name on mobile */
-    .match-character-name {
-        font-size: 1.5em !important;
-        letter-spacing: 0.08em !important;
-    }
-
-    /* Calendar converters stack on mobile */
-    .calendar-converters {
-        grid-template-columns: 1fr;
-    }
-
-    /* Shrink header title on mobile */
-    .app-header h1 {
-        font-size: 1.6em;
-    }
-
-    /* Make container padding smaller */
-    .container {
-        padding: 12px;
-        margin: 15px auto;
-    }
-}
-
-/* --- Quiz Match Goes By and Aliases --- */
-.match-goes-by,
-.match-aliases {
-    font-family: var(--font-serif);
-    font-size: 0.95em;
-    color: var(--text-color);
-    text-align: center;
-    margin: 4px 0;
-    opacity: 0.85;
-}
-
-.match-goes-by em,
-.match-aliases em {
-    font-style: italic;
-    color: var(--primary-color);
-}
-
-.dark-mode .match-goes-by em,
-.dark-mode .match-aliases em {
-    color: #FFD700;
 }
