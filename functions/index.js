@@ -344,35 +344,43 @@ export const processQuizAnswers = onCall(
             const text = response.text();
             console.log("Gemini Response:", text);
 
-            // Match against actual Firestore character names for reliability
-            // Re-fetch characters to find which one Gemini picked
+            // Match against finalChars (already fetched) — no extra Firestore call needed
+            // Scan only the MATCH section to avoid false positives from character mentions elsewhere
             let matchedCharacterName = null;
             let matchedPortraitURL = null;
             let matchedGoesBy = null;
             let matchedAliases = [];
             try {
-                const textUpper = text.toUpperCase();
-                const charsSnap = await db.collection('characters').get();
-                charsSnap.forEach(doc => {
-                    const charData = doc.data();
-                    if (!charData.name) return;
-                    const nameParts = charData.name.toUpperCase().split(' ');
-                    // Match on first name only — most reliable since Gemini may mangle long names
+                const matchSectionStart = text.indexOf('YOUR AIRDAEYA MATCH');
+                const matchSectionText = matchSectionStart !== -1
+                    ? text.substring(matchSectionStart, matchSectionStart + 300).toUpperCase()
+                    : text.substring(0, 300).toUpperCase();
+
+                console.log("Scanning match section:", matchSectionText.substring(0, 100));
+
+                for (const charData of finalChars) {
+                    if (!charData.name) continue;
+                    const nameUpper = charData.name.toUpperCase();
+                    const nameParts = nameUpper.split(' ');
                     const firstName = nameParts[0];
-                    // Also try full name and first+last
                     const firstAndLast = nameParts[0] + (nameParts.length > 1 ? ' ' + nameParts[nameParts.length - 1] : '');
-                    if (textUpper.includes(charData.name.toUpperCase()) ||
-                        textUpper.includes(firstAndLast) ||
-                        textUpper.includes(firstName)) {
+                    const goesByUpper = charData.goesBy ? charData.goesBy.toUpperCase() : null;
+
+                    // Check full name, first+last, first name, AND goesBy name
+                    if (matchSectionText.includes(nameUpper) ||
+                        matchSectionText.includes(firstAndLast) ||
+                        matchSectionText.includes(firstName) ||
+                        (goesByUpper && matchSectionText.includes(goesByUpper))) {
                         matchedCharacterName = charData.name;
                         matchedPortraitURL = charData.portraitURL || charData.drakkaenPortraitURL || null;
                         matchedGoesBy = charData.goesBy || null;
                         matchedAliases = charData.aliases || [];
-                        console.log("Portrait match found:", matchedCharacterName, matchedPortraitURL);
+                        console.log("Match found:", matchedCharacterName, "goesBy:", matchedGoesBy);
+                        break; // Stop at first match in the match section
                     }
-                });
+                }
             } catch (e) {
-                console.warn("Could not match character portrait:", e);
+                console.warn("Could not match character:", e);
             }
             return { matchResult: text, matchedCharacterName, matchedPortraitURL, matchedGoesBy, matchedAliases };
         } catch (error) {
