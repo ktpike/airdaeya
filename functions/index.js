@@ -326,13 +326,14 @@ export const processQuizAnswers = onCall(
         // Build character prompt with pre-filtered list
         prompt += "Available Airdaeya Characters:\n";
         finalChars.forEach(charData => {
-            prompt += `- ${charData.name}: ${charData.description || 'No description available.'}\n`;
+            const displayName = charData.goesBy || charData.name;
+            prompt += `- ${charData.name} (goes by: ${displayName}): ${charData.description || 'No description available.'}\n`;
             if (charData.expression !== undefined) prompt += `  Expression Number: ${charData.expression}.\n`;
             if (charData.heartsDesire !== undefined) prompt += `  Hearts Desire Number: ${charData.heartsDesire}.\n`;
             if (charData.lifePath !== undefined) prompt += `  Life Path Number: ${charData.lifePath}.\n`;
             if (charData.personality !== undefined) prompt += `  Personality Number: ${charData.personality}.\n`;
         });
-        prompt += "\n";
+        prompt += "IMPORTANT: When referring to characters in your response, always use their preferred name (goes by) rather than their full name. For example, refer to 'Ki-Llani Kunigundo Deairheann' as 'Llani', and 'Qatzsi Balaerdo' as 'Qat'.\n\n";
 
         console.log("Gemini Prompt constructed:", prompt);
 
@@ -347,6 +348,8 @@ export const processQuizAnswers = onCall(
             // Re-fetch characters to find which one Gemini picked
             let matchedCharacterName = null;
             let matchedPortraitURL = null;
+            let matchedGoesBy = null;
+            let matchedAliases = [];
             try {
                 const textUpper = text.toUpperCase();
                 const charsSnap = await db.collection('characters').get();
@@ -363,13 +366,15 @@ export const processQuizAnswers = onCall(
                         textUpper.includes(firstName)) {
                         matchedCharacterName = charData.name;
                         matchedPortraitURL = charData.portraitURL || charData.drakkaenPortraitURL || null;
+                        matchedGoesBy = charData.goesBy || null;
+                        matchedAliases = charData.aliases || [];
                         console.log("Portrait match found:", matchedCharacterName, matchedPortraitURL);
                     }
                 });
             } catch (e) {
                 console.warn("Could not match character portrait:", e);
             }
-            return { matchResult: text, matchedCharacterName, matchedPortraitURL };
+            return { matchResult: text, matchedCharacterName, matchedPortraitURL, matchedGoesBy, matchedAliases };
         } catch (error) {
             console.error("Error calling Gemini API:", error);
             let errorMessage = 'Failed to get a response from the AI model.';

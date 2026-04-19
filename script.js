@@ -392,18 +392,30 @@ function handleSubmitQuiz() {
             console.log("Matched character:", matchedCharacterName);
 
             const portraitURL = result.data.matchedPortraitURL || null;
+            const matchedGoesBy = result.data.matchedGoesBy || null;
+            const matchedAliases = result.data.matchedAliases || [];
             console.log("Portrait URL from function:", portraitURL);
 
             const nameHTML = matchedCharacterName
                 ? `<div class="match-character-name">${matchedCharacterName}</div>`
                 : '';
 
+            const goesByHTML = matchedGoesBy && matchedGoesBy !== matchedCharacterName
+                ? `<div class="match-goes-by">Goes by: <em>${matchedGoesBy}</em></div>`
+                : '';
+
+            const aliasesHTML = matchedAliases && matchedAliases.length > 0
+                ? `<div class="match-aliases">Also known as: <em>${matchedAliases.join(', ')}</em></div>`
+                : '';
+
             const portraitHTML = portraitURL
                 ? `<div class="match-portrait-container">
                        ${nameHTML}
                        <img src="${portraitURL}" alt="Character portrait" class="match-portrait" />
+                       ${goesByHTML}
+                       ${aliasesHTML}
                    </div>`
-                : nameHTML;
+                : `${nameHTML}${goesByHTML}${aliasesHTML}`;
 
             characterDisplayArea.innerHTML = `
                 <button class="back-button" id="back-to-home-btn">← Back to Home</button>

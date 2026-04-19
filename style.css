@@ -871,3 +871,25 @@ h1.character-detail-name {
         margin: 15px auto;
     }
 }
+
+/* --- Quiz Match Goes By and Aliases --- */
+.match-goes-by,
+.match-aliases {
+    font-family: var(--font-serif);
+    font-size: 0.95em;
+    color: var(--text-color);
+    text-align: center;
+    margin: 4px 0;
+    opacity: 0.85;
+}
+
+.match-goes-by em,
+.match-aliases em {
+    font-style: italic;
+    color: var(--primary-color);
+}
+
+.dark-mode .match-goes-by em,
+.dark-mode .match-aliases em {
+    color: #FFD700;
+}
