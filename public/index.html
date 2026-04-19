@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airdaeya: Character Quiz</title>
+        <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/favicon.ico/favicon-96x96.png" sizes="96x96" />
+    <!-- Google Fonts for a custom fantasy look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400..900;1,400..900&family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&family=Lato:ital,wght@0,100;0,300;0,400;0,700;0,900;1,100;1,300;1,400;1,700;1,900&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Lato', sans-serif;
+            color: #dddddd; /* Main text color */
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            /* Hardcoded background image from the provided URL */
+            background-image: url('https://ktpike.wordpress.com/wp-content/uploads/2025/09/ktpwallpaper.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            transition: background-image 0.5s ease-in-out;
+        }
+
+        .card {
+            background-color: rgba(124, 105, 64, 0.9); /* #7c6940 with transparency */
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(5px);
+        }
+
+        /* Dark Mode styles */
+        body.dark-mode {
+            background-color: #500041;
+            color: #cccccc;
+        }
+
+        body.dark-mode .card {
+            background-color: rgba(80, 0, 65, 0.9); /* #500041 with transparency */
+        }
+        
+        body.dark-mode .button-primary {
+            background-color: #00500f;
+            color: #cccccc;
+        }
+
+        body.dark-mode .button-secondary {
+            background-color: #7c6940;
+            color: #cccccc;
+        }
+
+        .answer-option {
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+            /* --- ADD THESE STYLES --- */
+            display: block; /* Make them block-level to stack vertically */
+            width: 100%; /* Make them fill the available width */
+            padding: 0.75rem 1.5rem; /* Add generous padding */
+            border-radius: 0.5rem; /* Slightly rounded corners */
+            background-color: rgba(124, 105, 64, 0.7); /* Match card background with transparency */
+            color: #ffffff; /* White text for contrast */
+            margin-bottom: 0.5rem; /* Space between options */
+            border: 1px solid transparent; /* Default border */
+            /* --- END ADDED STYLES --- */
+        }
+
+        .answer-option:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            /* --- ADD THIS (lighter background on hover) --- */
+            background-color: rgba(124, 105, 64, 0.9);
+        }
+
+        .answer-option.selected {
+            border: 2px solid #500041; /* This will now apply! */
+            /* --- ADD THIS (lighter background when selected) --- */
+            background-color: rgba(124, 105, 64, 0.9);
+        }
+
+        /* Ensure dark mode styles are also applied for answer options */
+        body.dark-mode .answer-option {
+            background-color: rgba(80, 0, 65, 0.7); /* Dark mode background */
+            color: #cccccc;
+        }
+
+        body.dark-mode .answer-option:hover {
+            background-color: rgba(80, 0, 65, 0.9); /* Dark mode hover background */
+        }
+
+        body.dark-mode .answer-option.selected {
+            border: 2px solid #00500f; /* Dark mode selected border (adjust color if needed) */
+            background-color: rgba(80, 0, 65, 0.9);
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background-color: #7c6940;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.3);
+            max-width: 80%;
+            text-align: center;
+        }
+
+        .quiz-result-name {
+            color: #500041; /* Default light mode color */
+            font-family: 'IM Fell English SC', serif;
+        }
+
+        body.dark-mode .quiz-result-name {
+            color: #606f92; /* Dark mode color */
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="card p-8 w-full max-w-xl text-center relative z-10">
+        <!-- Dark Mode Toggle Button -->
+        <button id="dark-mode-toggle" class="absolute top-4 right-4 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-full text-xs">
+            Toggle Dark Mode
+        </button>
+
+        <!-- Main title and subtitle -->
+        <h1 id="app-title" class="text-4xl font-extrabold mb-2" style="color: #500041; font-family: 'IM Fell English SC', serif;">Airdaeya</h1>
+        <h2 class="text-xl font-semibold mb-6" style="color: #dddddd; font-family: 'Alegreya', serif;">Airdaeya's Compendium</h2>
+
+        <!-- Authentication and Welcome Screen -->
+        <div id="auth-screen">
+            <h3 class="text-2xl font-bold mb-4" style="color: #cccccc; font-family: 'Alegreya', serif;">Welcome, traveler!</h3>
+            
+            <!-- Login/Signup form -->
+            <div class="space-y-4 mb-6">
+                <input type="email" id="emailInput" placeholder="Email" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00500f]">
+                <input type="password" id="passwordInput" placeholder="Password" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00500f]">
+                <!-- New password confirmation field -->
+                <input type="password" id="confirmPasswordInput" placeholder="Confirm Password" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00500f] hidden">
+            </div>
+            
+            <div class="flex flex-col sm:flex-row justify-center space-y-2 sm:space-y-0 sm:space-x-4 mb-6">
+                <button id="signInBtn" class="button-primary bg-[#00500f] hover:bg-[#003b0a] text-white font-bold py-2 px-4 rounded-full transition-colors duration-300 transform hover:scale-105">
+                    Sign In
+                </button>
+                <!-- Existing sign up button, will change text and behavior -->
+                <button id="signUpBtn" class="button-secondary bg-[#7c6940] hover:bg-[#6a5a36] text-white font-bold py-2 px-4 rounded-full transition-colors duration-300 transform hover:scale-105">
+                    Sign Up
+                </button>
+            </div>
+            
+            <!-- New Confirm Sign Up button, hidden initially -->
+            <button id="confirmSignUpBtn" class="button-primary bg-[#00500f] hover:bg-[#003b0a] text-white font-bold py-2 px-4 rounded-full transition-colors duration-300 transform hover:scale-105 hidden mb-6">
+                Confirm Sign Up
+            </button>
+            
+            <button id="anonymousBtn" class="text-sm text-gray-400 hover:text-gray-200 underline">
+                Continue as a Guest
+            </button>
+        </div>
+
+        <!-- Quiz welcome section (hidden initially) -->
+        <div id="quiz-welcome-screen" class="hidden">
+            <h3 class="text-2xl font-bold mb-4" style="color: #cccccc; font-family: 'Alegreya', serif;">Discover Your Hidden Drakkaen Nakkla</h3>
+            <p class="mb-6" style="color: #dddddd;">
+                Welcome to the official companion app for the Tales of Airdaeya Chronicles. Take this quiz to discover which powerful Drakkaen Nakkla from the world of Oram you are most like!
+            </p>
+            <button id="start-quiz-btn" class="button-primary bg-[#00500f] hover:bg-[#003b0a] text-white font-bold py-3 px-6 rounded-full transition-colors duration-300 transform hover:scale-105">
+                Start the Quiz
+            </button>
+        </div>
+
+        <!-- Immediately after your closing </div id="app"> -->
+        <div id="loading-screen" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-50">
+            <div class="text-white text-xl flex flex-col items-center">
+                <svg class="animate-spin h-8 w-8 text-white mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Processing your Drakkaen Nakkla...
+            </div>
+        </div>
+
+        <!-- Quiz section (hidden initially) -->
+        <div id="quiz-screen" class="hidden">
+            <h3 id="quiz-question" class="text-2xl font-bold mb-6" style="color: #cccccc; font-family: 'Alegreya', serif;"></h3>
+            <div id="quiz-answers" class="space-y-4"></div>
+
+        <!-- Question Navigation and Submission -->
+        <div class="flex justify-between items-center mt-6">
+            <button id="prev-question-btn" class="button-secondary bg-[#7c6940] hover:bg-[#6a5a36] text-white font-bold py-2 px-4 rounded-full transition-colors duration-300 transform hover:scale-105" style="min-width: 100px;">Previous</button>
+            <p class="text-lg text-white">
+                <span id="current-question">1</span> / <span id="total-questions">5</span>
+            </p>
+            <button id="next-btn" class="button-primary bg-[#00500f] hover:bg-[#003b0a] text-white font-bold py-2 px-4 rounded-full transition-colors duration-300 transform hover:scale-105" style="min-width: 100px;">Next</button>
+        </div>
+
+        <button id="submit-quiz-btn" class="button-primary bg-red-700 hover:bg-red-800 text-white font-bold py-3 px-6 rounded-full mt-6 hidden transition-colors duration-300 transform hover:scale-105">
+            Submit Quiz
+        </button>
+    </div> <!-- This closing div belongs to quiz-screen -->
+
+
+        <!-- Result section (hidden initially) -->
+        <div id="result-screen" class="hidden">
+            <h3 class="text-2xl font-bold mb-4" style="color: #cccccc; font-family: 'Alegreya', serif;">Your Drakkaen Nakkla:</h3>
+            <div id="result-content" class="text-gray-700"></div>
+            <button id="restart-btn" class="button-secondary bg-[#7c6940] hover:bg-[#6a5a36] text-white font-bold py-3 px-6 rounded-full mt-6">Restart Quiz</button>
+            
+            <!-- Multiplayer Section -->
+            <div id="multiplayer-section" class="mt-8 pt-6 border-t border-gray-600 space-y-4">
+                <h4 class="text-xl font-bold" style="color: #cccccc; font-family: 'Alegreya', serif;">Connect with Others!</h4>
+                <p class="text-xs text-gray-400">Your result is being shared publicly to the leaderboard. You can also share your User ID with friends to show them your result.</p>
+                <div class="flex flex-col items-center justify-center">
+                    <span id="userIdDisplay" class="text-sm font-mono text-white p-2 bg-gray-700 rounded-lg break-all"></span>
+                    <button id="copyIdBtn" class="bg-gray-500 hover:bg-gray-600 text-white text-xs py-1 px-3 rounded-full mt-2">Copy User ID</button>
+                </div>
+                
+                <h4 class="text-xl font-bold mt-6" style="color: #cccccc; font-family: 'Alegreya', serif;">Leaderboard</h4>
+                <ul id="leaderboard-list" class="text-left space-y-2 text-gray-300">
+                    <!-- Leaderboard items will be rendered here -->
+                </ul>
+
+                <h4 class="text-xl font-bold mt-6" style="color: #cccccc; font-family: 'Alegreya', serif;">Find a Friend's Result</h4>
+                <div class="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-2 w-full">
+                    <input type="text" id="friendIdInput" placeholder="Enter a friend's User ID" class="w-full sm:w-auto p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00500f]">
+                    <button id="findFriendBtn" class="button-primary bg-[#00500f] hover:bg-[#003b0a] text-white py-2 px-4 rounded-full">Find Result</button>
+                </div>
+                <div id="friendResultDisplay" class="mt-4 text-left p-4 rounded-lg bg-gray-800 hidden">
+                    <!-- Friend's result will be displayed here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- User Controls and Status -->
+        <div id="user-status" class="absolute top-4 left-4 hidden">
+            <p id="user-info" class="text-sm font-semibold"></p>
+            <button id="signOutBtn" class="text-xs text-red-400 hover:underline">Sign Out</button>
+        </div>
+    </div>
+    
+    <!-- Custom Modal for Messages -->
+    <div id="modal" class="modal hidden">
+        <div class="modal-content">
+            <p id="modal-message" class="text-lg text-white font-bold"></p>
+            <button id="modal-close-btn" class="button-secondary bg-[#7c6940] text-white font-bold py-2 px-4 rounded-full mt-4">Close</button>
+        </div>
+    </div>
+
+    <script type="module">
+        // Firebase imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+
+        // IMPORTANT: Log level for debugging Firestore issues.
+        setLogLevel('Debug');
+
+        // Global variables provided by the Canvas environment. DO NOT change these.
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+        apiKey: "AIzaSyBiDTZEwJbnssFewhlrwXCVfdGi_SP1eHQ",
+        authDomain: "aetherium-c34f7.firebaseapp.com",
+        projectId: "aetherium-c34f7",
+        storageBucket: "aetherium-c34f7.firebasestorage.app",
+        messagingSenderId: "286421259055",
+        appId: "1:286421259055:web:061304f94587051e8d87da",
+        measurementId: "G-NQXL71G19E"
+};
+        // --- Firebase Initialization and Authentication ---
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const functions = getFunctions(app);
+        const auth = getAuth(app);
+        let userId;
+        let isAuthReady = false;
+        let isLoading = false; // Flag to prevent multiple rapid submissions (Moved to top-level)
+
+        // Auth UI elements
+        const authScreen = document.getElementById('auth-screen');
+        const quizWelcomeScreen = document.getElementById('quiz-welcome-screen');
+        const userStatusDisplay = document.getElementById('user-status');
+        const userInfoEl = document.getElementById('user-info');
+        const passwordInput = document.getElementById('passwordInput');
+        const confirmPasswordInput = document.getElementById('confirmPasswordInput');
+        const signInBtn = document.getElementById('signInBtn');
+        const signUpBtn = document.getElementById('signUpBtn');
+        const confirmSignUpBtn = document.getElementById('confirmSignUpBtn');
+        const anonymousBtn = document.getElementById('anonymousBtn');
+        const signOutBtn = document.getElementById('signOutBtn');
+
+        // Main Quiz UI elements
+        const quizScreen = document.getElementById('quiz-screen');
+        const resultScreen = document.getElementById('result-screen');
+        const startQuizBtn = document.getElementById('start-quiz-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const quizQuestionEl = document.getElementById('quiz-question');
+        const quizAnswersEl = document.getElementById('quiz-answers');
+        const prevQuestionBtn = document.getElementById('prev-question-btn');
+        const submitQuizBtn = document.getElementById('submit-quiz-btn');
+        const currentQuestionSpan = document.getElementById('current-question');
+        const totalQuestionsSpan = document.getElementById('total-questions');
+
+        // Loading, Modal & Result UI elements
+        const loadingScreen = document.getElementById('loading-screen');
+        const modal = document.getElementById('modal');
+        const modalMessage = document.getElementById('modal-message');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        const resultContentEl = document.getElementById('result-content');
+        const restartQuizBtn = document.getElementById('restart-btn');
+
+        // Multiplayer UI elements
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const copyIdBtn = document.getElementById('copyIdBtn');
+        const leaderboardList = document.getElementById('leaderboard-list');
+        const friendIdInput = document.getElementById('friendIdInput');
+        const findFriendBtn = document.getElementById('findFriendBtn');
+        const friendResultDisplay = document.getElementById('friendResultDisplay');
+        const multiplayerSection = document.getElementById('multiplayer-section');
+
+        // Other UI elements
+        const darkModeToggle = document.getElementById('dark-mode-toggle');
+        const appTitle = document.getElementById('app-title');
+
+        // --- Quiz Data and State ---
+        let currentQuestionIndex = 0;
+        let userAnswers = [];
+
+        const quizQuestions = [
+            {
+                question: "What's the most appealing form of recognition?",
+                answers: [
+                    "Being a respected authority with a lasting legacy.",
+                    "Being known for your cunning and ability to survive.",
+                    "Being a pioneer who creates something new and unheard of.",
+                    "Being a beloved member of your community."
+                ]
+            },
+            {
+                question: "What motivates you the most?",
+                answers: [
+                    "Finding the truth about a mystery.",
+                    "Healing a deep-seated pain.",
+                    "Protecting your loved ones.",
+                    "Winning a thrilling contest."
+                ]
+            },
+            {
+                question: "What makes you feel most at home?",
+                answers: [
+                    "Being with my family in a place of my own making.",
+                    "Finding a community of like-minded people.",
+                    "Working alone toward a major goal.",
+                    "Being in a place where I can truly be myself."
+                ]
+            },
+            {
+                question: "If you could instantly learn any skill, which would you choose?",
+                answers: [
+                    "The ability to fix and build anything.",
+                    "The power to express yourself without words.",
+                    "The skill to persuade anyone to do what you want.",
+                    "The gift of seeing the future."
+                ]
+            },
+            {
+                question: "What is your relationship with the past?",
+                answers: [
+                    "It's a source of valuable lessons.",
+                    "It's something to be avenged.",
+                    "It's a mystery waiting to be uncovered.",
+                    "It's something I'd prefer not to dwell on."
+                ]
+            },
+            {
+                question: "What's the most appealing thing about a wild animal?",
+                answers: [
+                    "Their single-minded focus and unwavering determination.",
+                    "Their ability to adapt and survive in any environment.",
+                    "Their playful and mischievous nature.",
+                    "Their gentle spirit and deep intuition."
+                ]
+            },
+            {
+                question: "What would be the most difficult challenge to face?",
+                answers: [
+                    "Being unable to speak or communicate effectively.",
+                    "Having to follow rules and traditions you don't believe in.",
+                    "Living a life where your talents are never fully used.",
+                    "Being forced to live a quiet life without adventure."
+                ]
+            },
+            {
+                question: "Imagine a world full of secrets. What would you do with them?",
+                answers: [
+                    "Use them to gain power and influence.",
+                    "Share them only with those who are worthy.",
+                    "Keep them to yourself, as they are your burden alone.",
+                    "Expose the most harmful ones for the good of all."
+                ]
+            },
+            {
+                question: "What does 'home' mean to you?",
+                answers: [
+                    "A place you built with your own hands.",
+                    "A place you are trying to get back to.",
+                    "A place you are trying to escape.",
+                    "A place where you can be a leader."
+                ]
+            },
+            {
+                question: "Which of these describes your deepest fear?",
+                answers: [
+                    "Losing control of yourself or your circumstances.",
+                    "Being misunderstood and never truly seen.",
+                    "Being abandoned by those you trust.",
+                    "Failing to fulfill your destiny."
+                ]
+            },
+            {
+                question: "What is your greatest strength?",
+                answers: [
+                    "My resourcefulness and quick wit.",
+                    "My loyalty to those who earn it.",
+                    "My ability to see the bigger picture.",
+                    "My courage to stand alone."
+                ]
+            },
+            {
+                question: "You're at a crossroads. Do you choose the path of...",
+                answers: [
+                    "...the most challenging path, the one that promises the most growth.",
+                    "...the one that leads to the most fame and recognition.",
+                    "...the one that is completely new and promises the most adventure.",
+                    "...the one that allows you to help those who need it most."
+                ]
+            }
+        ];
+
+    // --- HELPER FUNCTIONS DEFINITIONS (ALL GO HERE, AFTER UI element references and state) ---
+    function hideQuiz() {
+        // Use quizScreen if that's the main quiz wrapper
+        if (quizScreen) { 
+            quizScreen.style.display = 'none';
+        } else if (quizScreen) { // Fallback if quizScreen is used for the entire quiz section
+            quizScreen.style.display = 'none';
+        }
+    }
+
+    function displayLoadingAnimation() {
+        if (loadingScreen) {
+            loadingScreen.style.display = 'flex'; // Or 'block' depending on your CSS
+        }
+    }
+
+    function hideLoadingAnimation() {
+        if (loadingScreen) {
+            loadingScreen.style.display = 'none';
+        }
+    }
+
+    // Your actual displayModal function from the snippet
+    function displayModal(message, type = 'info') {
+        if (modal && modalMessage) {
+            modalMessage.innerHTML = message;
+            modal.classList.remove('modal-success', 'modal-error', 'modal-info'); // Clear previous types
+            modal.classList.add(`modal-${type}`); // Add current type
+            
+            modal.classList.remove('hidden'); // Show the modal
+            modal.classList.add('flex');     // Ensure it's displayed as flex
+        } else {
+            console.warn("Modal elements not found for displayModal:", message);
+            alert(message); // Fallback for debugging if modal not found
+        }
+    }
+
+    // Your actual closeModal function from the snippet
+    function closeModal() {
+        if (modal) {
+            modal.classList.add('hidden');    // Hide the modal
+            modal.classList.remove('flex');  // Remove flex display
+        }
+    }
+
+    // --- Core Logic Functions ---
+    function handleAnswerClick(answer, button) {
+        userAnswers[currentQuestionIndex] = answer; // Using userAnswers
+        // Remove 'selected' class from all other buttons
+        Array.from(quizAnswersEl.children).forEach(btn => { // Using quizAnswersEl
+            btn.classList.remove('selected');
+        });
+        button.classList.add('selected');
+        // If it's the last question, enable submit button
+        if (currentQuestionIndex === quizQuestions.length - 1 && userAnswers[currentQuestionIndex] !== undefined) { // Using quizQuestions
+            submitQuizBtn.disabled = false;
+        }
+    }
+    
+    function displayQuestion() {
+        if (currentQuestionIndex < quizQuestions.length) { // Using quizQuestions
+            const question = quizQuestions[currentQuestionIndex]; // Using quizQuestions
+            quizQuestionEl.textContent = question.question; // Using quizQuestionEl
+            quizAnswersEl.innerHTML = ''; // Clear previous options (Using quizAnswersEl)
+            question.answers.forEach((answer) => { // Using question.answers from your quizQuestions
+                const button = document.createElement('button');
+                button.textContent = answer;
+                button.classList.add('answer-option');
+                if (userAnswers[currentQuestionIndex] === answer) { // Using userAnswers
+                    button.classList.add('selected');
+                }
+                button.addEventListener('click', () => handleAnswerClick(answer, button));
+                quizAnswersEl.appendChild(button); // Using quizAnswersEl
+            });
+            currentQuestionSpan.textContent = currentQuestionIndex + 1;
+            totalQuestionsSpan.textContent = quizQuestions.length; // Using quizQuestions
+            prevQuestionBtn.disabled = currentQuestionIndex === 0;
+            nextBtn.disabled = currentQuestionIndex === quizQuestions.length - 1; // Add this line
+            submitQuizBtn.style.display = currentQuestionIndex === quizQuestions.length - 1 ? 'block' : 'none';
+        }
+    }
+
+    function showQuestion(questionIndex) {
+        currentQuestionIndex = questionIndex;
+        displayQuestion();
+    }
+
+    async function endQuizAndProcessAnswers() {
+        if (isLoading) return;
+        isLoading = true;
+        hideQuiz();
+        displayLoadingAnimation();
+
+        const userAuthId = auth.currentUser ? auth.currentUser.uid : null; // Renamed to avoid confusion with top-level userId
+
+        let resultFromCloudFunction; 
+        let geminiResultText;
+        let text; // text also needs to be declared here
+
+        try {
+            if (!userAuthId) { // Check for userAuthId
+                displayModal("Authentication not ready. Please wait and try again.", 'warning'); // Use displayModal
+                isLoading = false;
+                hideLoadingAnimation();
+                return;
+            }
+
+            const systemPrompt = `You are a mystical loremaster from the world of Oram, tasked with determining a person's inner Drakkaen Nakkla based on their personality and choices. You have a deep understanding of the twelve core Drakkaen Nakkla, partially informed by Decoz numerology:
+            
+                - Qat (Book 1 Catching Qat): Life Path Number 6; Personality 1; Expression 6; Heart’s Desire 5. Qat is an assassin and thief (and twin to Qrow) and uses ae/aer/aem pronouns. Ae has no memory before eleven years old when ae was abducted by the pirate Captain Rogen. Ae grew up on the pirate ship, continuing to hone skills ae didn't know ae had - wielding and fighting with a knife and whip, and pickpocketing. Trademark moves are stripping aer opponent by slicing buttons, ties, etc. from their clothing. Qat often uses dice to make decisions (even important ones). Qat has never had magic, but lately, it seems ae can use "harpoon thoughts" that are implanted in other people’s minds. Qat has been on the run from Captain Rogen since ae assassinated Rogen’s first mate over a decade ago. Qat has recently met aer brother, Qrow, and has mixed feelings about it. Ae thought that by not known aer past, ae made aerself, but is now learning that many of the things ae did well were things ae did before the amnesia.
+                - Qrow (Book 1 Catching Qat): Life Path Number 6; Personality 8; Expression 9; Heart’s Desire 1. Qrow’s mother was killed in front of him at age 11, and his twin (Qat) was taken. He was then abandoned by his people (a traveling troupe) and left alone in a strange city. He formed a street gang of spies and eventually became one of the richest men on the continent. He has spent most of his life searching for his twin. He uses psychic magic through sound and vibrations from his vocal chords, which are layered around and through his speech. He learned the skill from his mother and honed it in the boardroom, learning how to affect emotions, glean motivations, and manipulate actions. He has recently found his twin, and must now find a new life goal. He fell in love with Doscia, who at the time was an up-and-coming athlete. She broke up with him to follow her career, and now he is somewhat jaded by love and is determined to be a philandering bachelor.
+                - Llani (Book 2 Legacies): Life Path Number 8; Personality 4; Expression 2; Heart’s Desire 7. Llani appears in the first book. She is an elf with innate magic, which she can't always control. She was not given access to advanced texts by her instructors for fear that she would destroy them by accident. She is (by a genetic mutation) the only one of her species that is a completely different color (purple). It has been her goal to discover who her father is and the reason for the mutation. Her subspecies of elves live within the trees. They can "talk" to trees, manipulate wood, etc. Because of a mutation at birth, she can also extract energy from living beings like plants and animals and use it to heal herself or others. She spends most of her time reading and studying.
+                - Akin (Book 2 Legacies): Life Path Number 2; Personality 6; Expression 8; Heart’s Desire 2. Akin appears in the first book. He cannot speak due to an injury to his throat at birth. Although he was born part ukulu, who shun magic, he has innate elemental magic that he accesses by gathering energy by way of idjame, a form of martial arts. He doesn’t know his father and was raised by a missionary woman he calls his aunt, who knows Akin’s father. Akin speaks using sign language. He can separate his soul from his body and astrally project. He grew up with severe abdominal pain, and uses the pain as a focus, both for control and with his magic. When he is soul soaring, most people believe he is meditating. He is the best fighter in the group and trains them in drills and maneuvers.
+                - Doscia (Book 3): Life Path Number 2; Personality 4; Expression 9; Heart’s Desire 5. Doscia appears in the first book. She is a daga (imagine a doglike humanoid creature), mixed with danaash (like a human), elf, and faerie. She trained as a long-distance athlete but joined the academy and is a rookie investigator. She has great instincts. When given a choice of a relationship (with Qrodin) or a career, she chose her career. She loves the color pink.
+                - Aamkyaap (Book 3): Life Path Number 6; Personality 5; Expression 7; Heart’s Desire 2. He is the prince of the Merkama (an underwater species like merman). He suspected someone close to his mother, the queen, was stealing artifacts. That person changed him into a seahorse (when in water) and a horse (when on land). In either body, he cannot speak except through body language. He left home for fear of his life. Although we are introduced to Aamkyaap, we don’t realize it because he goes by another name. We will understand who he is in Book 3.
+                - Bell (Book 4): Life Path Number 5 Personality 4; Expression 3; Heart’s Desire 8. Bell appears in the first book. She is a hablis (imagine a hobbit) who can track, shoot a bow, hunt, and cook. Her family lives in clans and mostly farms. Hablis have a deep understanding of all things farming, natural irrigation, food, etc. She's farsighted but doesn't wear glasses because she lacks confidence. She leaves home because she’s in love with her best friend, who just became engaged to someone else. She is very messy (clothes are always stained), but she loves everyone and empathizes easily. She is excited by new opportunities and quite endearing. The only magic that Bell has is in naming things. Every time she names something, it is enhanced in some way.
+                - Kasaandra (Book 4): Life Path Number 3; Personality 4; Expression 1; Heart’s Desire 6. Kassandra appears in the first book. Unlike her family (paternal side are blacksmiths and maternal side are bakers), she uses a battleaxe instead of a hammer during battle. Within Dwarf Mountain, there are traditional gender professions, and she has been discouraged from being a bladesmith, but it's all she wants to do. As a child, she also learned to tame baby giant spiders and harvest their spider silk. This feat (unknown to the rest of the team) was quite lucrative since items made with the silk are lighter and stronger than any other cloth. She isn't scholarly, but she can visualize how things work and break them down into simple parts. She often solves problems by using the simplest method possible. She's industrious, always working, and despises Llani's tendency to read. She's very loyal and trustworthy. She LOVES food (especially Bell's) and can be quite grumpy when hot. She and Akin are friends.
+                - Nightshade (Book 5): Life Path Number 4; Personality 3; Expression 4; Heart’s Desire 1. Nightshade appears in the first book. She is a faerie. Most creatures cannot see faeries, but the Drakkaen Nakkla can. This is very upsetting to her. Her father is the most notorious Assassin on the continent, Kish. She is following in his footsteps and is an assassin. She and Qat met as competitors for the same contract hit. Nightshade won. She can shrink herself. She is a bit of a troublemaker, but in a fun way. She and Qat are reluctant friends. She wants to get away from the faerie guild and thinks Qat is her way to escape.
+                - Jherdi (Book 5): Life Path Number 5 Personality 7; Expression 5; Heart’s Desire 7. Jherdi is an outcast by choice because he craves the freedom to do what he wants, when he wants. He lost a close friend to a demon and is determined to exact revenge. He successfully stalks the demon’s lair, a series of caves and winding tunnels. We don’t meet Jherdi until Book 2 Legacies.
+                - Xarie (Book 6): Life Path Number 2; Personality 3; Expression 9; Heart’s Desire 6. Xarie appears in the first book, but we don’t realize it. We will know him by name in book 2 Legacies. He is born underwater in a sunken ship and rescued by Bell, who keeps his presence a secret.
+                - Taughban (Book 6): Life Path Number 9 Personality 7; Expression 5; Heart’s Desire 7. The third of his name because his two oldest brothers were born with the same name and died before he was born. He has been listening to his father’s stories about the Drakkaen Nakkla and believes his destiny is to join the fight against dragons when they return on Darkest Night. His older sister is Kasaandra, whom he barely knows since she left home when he was very young. He senses that she doesn't like him and doesn't know why.
+
+                
+                The user has answered a series of questions. Your task is to analyze their answers and determine which Drakkaen Nakkla they are most like. Provide a one-paragraph summary of their personality and explain why they align with that character. Your response must be in Markdown format, with the character name bolded and on a new line. Include the book number in which they will be featured and an invitation to continue reading if the character did not appear in Book 1.`;
+            
+            console.log("DEBUG: Calling Cloud Function. Current userAuthId:", userAuthId);
+            if (auth.currentUser) {
+                const idTokenResult = await auth.currentUser.getIdTokenResult();
+                console.log("DEBUG: Current user has ID Token:", !!idTokenResult.token); // Checks if token string is present
+                console.log("DEBUG: ID Token expiration time:", new Date(idTokenResult.expirationTime).toLocaleString());
+            } else {
+                console.log("DEBUG: auth.currentUser is NULL just before callable function call.");
+            }
+
+            // --- NEW CODE: Call the Cloud Function for Gemini analysis ---
+            console.log("Calling Cloud Function for Gemini analysis...");
+            const analyzeQuiz = httpsCallable(functions, 'generateQuizAnalysis');
+            
+            // Assign to the already-declared variable
+            resultFromCloudFunction = await analyzeQuiz({ userAnswers: userAnswers, systemPrompt: systemPrompt });
+            geminiResultText = resultFromCloudFunction.data.analysis;
+            
+            text = geminiResultText; // Assign to the already-declared variable
+            // --- END NEW CODE: Call the Cloud Function ---
+            
+            resultContentEl.innerHTML = `<h2>Your Airdaeya Character:</h2><div class="prose">${text}</div>`;
+            displayModal(text, 'success'); // Using displayModal as defined above
+
+            // --- Firestore Write Operations ---
+            if (userAuthId) { // Using userAuthId
+                const userQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/users/${userAuthId}/quizResults`);
+                await addDoc(userQuizResultsCollectionRef, {
+                    timestamp: new Date().toISOString(),
+                    characterResult: text,
+                    answers: userAnswers,
+                });
+                console.log("Quiz result saved to user's private collection in Firestore.");
+
+                const publicQuizResultsCollectionRef = collection(db, `artifacts/${firebaseConfig.projectId}/public/data/quizResults`);
+                await addDoc(publicQuizResultsCollectionRef, {
+                    timestamp: new Date().toISOString(),
+                    characterResult: text,
+                    userId: userAuthId, // Using userAuthId
+                });
+                console.log("Quiz result saved to public collection for leaderboard.");
+            } else {
+                console.warn("User not authenticated, skipping Firestore save for quiz results.");
+                displayModal("Quiz completed, but login required to save results!", 'warning'); // Using displayModal
+            }
+
+        } catch (error) {
+            console.error("Error processing quiz:", error);
+            displayModal(`An error occurred: ${error.message || "Please try again."}`, 'error'); // Using displayModal
+        } finally {
+            isLoading = false;
+            hideLoadingAnimation();
+            if (quizScreen) quizScreen.style.display = 'none'; // Use quizScreen for the main quiz UI
+            if (resultScreen) resultScreen.style.display = 'block'; // Use resultScreen for the main result UI
+        }
+    }
+
+
+    // --- EVENT LISTENERS ---
+    // Start Quiz Button
+    if (startQuizBtn) { // <--- Changed from 'quizStartBtn'
+        startQuizBtn.addEventListener('click', () => { // <--- Changed from 'quizStartBtn'
+            console.log("Start Quiz button clicked!"); // <--- ADD THIS LOG
+            quizWelcomeScreen.style.display = 'none';
+            if (quizScreen) quizScreen.style.display = 'block';
+            currentQuestionIndex = 0;
+            userAnswers = [];
+            displayQuestion();
+        });
+    }
+
+    // Previous Question Button
+    if (prevQuestionBtn) {
+        prevQuestionBtn.addEventListener('click', () => {
+            if (currentQuestionIndex > 0) {
+                currentQuestionIndex--;
+                displayQuestion();
+            }
+        });
+    }
+
+    // Next Question Button
+    if (nextBtn) { // Using nextBtn
+        nextBtn.addEventListener('click', () => {
+            if (currentQuestionIndex < quizQuestions.length - 1) { // Using quizQuestions
+                currentQuestionIndex++;
+                displayQuestion();
+            }
+        });
+    }
+
+    // Submit Quiz Button
+    if (submitQuizBtn) {
+        submitQuizBtn.addEventListener('click', async () => {
+            if (userAnswers.filter(a => a !== undefined).length === quizQuestions.length) { // Using userAnswers and quizQuestions
+                submitQuizBtn.disabled = true;
+                await endQuizAndProcessAnswers();
+            } else {
+                displayModal("Please answer all questions before submitting.", 'warning'); // Using displayModal
+            }
+        });
+    }
+
+    // Dark Mode Toggle
+    if (darkModeToggle) {
+        darkModeToggle.addEventListener('click', () => {
+            console.log("Dark Mode Toggle button clicked!"); // ADD THIS LOG FOR DEBUGGING
+            document.body.classList.toggle('dark-mode');
+            // Update button text
+            if (document.body.classList.contains('dark-mode')) {
+                darkModeToggle.textContent = 'Light Mode';
+            } else {
+                darkModeToggle.textContent = 'Dark Mode';
+            }
+            // Optional: Save preference to localStorage
+            localStorage.setItem('theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
+        });
+    }
+
+    // Modal Close Button
+    if (modalCloseBtn) {
+        modalCloseBtn.addEventListener('click', closeModal); // Your existing event listener
+    }
+    
+    // Restart Quiz Button
+    if (restartQuizBtn) { // Using restartBtn
+        restartQuizBtn.addEventListener('click', () => {
+            if (resultScreen) resultScreen.style.display = 'none'; // Use resultScreen
+            quizWelcomeScreen.style.display = 'block';
+            userAnswers = []; // Reset userAnswers
+            currentQuestionIndex = 0;
+            submitQuizBtn.disabled = true;
+        });
+    }
+
+    // --- Authentication Event Listeners ---
+    if (signInBtn) {
+    signInBtn.addEventListener('click', async () => {
+        console.log("Sign In button clicked!"); // <--- ADD THIS LOG
+        const email = emailInput.value;
+        const password = passwordInput.value;
+        try {
+            console.log("Attempting sign in with email:", email); // <--- ADD THIS LOG
+            await signInWithEmailAndPassword(auth, email, password);
+            console.log("User signed in successfully."); // <--- ADD THIS LOG
+            displayModal("Signed in successfully!", 'success'); // Changed to displayModal
+        } catch (error) {
+            console.error("Error during sign in process:", error); // <--- IMPORTANT: log the full error object
+            displayModal(`Sign-in failed: ${error.message}`, 'error'); // Changed to displayModal
+        }
+    });
+}
+
+    if (signUpBtn) {
+    signUpBtn.addEventListener('click', () => {
+        console.log("Sign Up button clicked!"); // <--- ADD THIS LOG
+        signUpBtn.style.display = 'none';
+        confirmSignUpBtn.style.display = 'inline-block';
+        confirmPasswordInput.style.display = 'block';
+    });
+}
+// ... (similar for confirmSignUpBtn with a log at the start of its async callback)
+
+    if (confirmSignUpBtn) { confirmSignUpBtn.addEventListener('click', async () => { /* ... */ }); }
+    if (anonymousBtn) {
+    anonymousBtn.addEventListener('click', async () => {
+        console.log("Anonymous Sign In button clicked!"); // <--- ADD THIS LOG
+        try {
+            await signInAnonymously(auth);
+            console.log("User signed in anonymously successfully."); // <--- ADD THIS LOG
+            displayModal("Signed in anonymously!", 'success'); // Changed to displayModal
+        } catch (error) {
+            console.error("Error during anonymous sign in process:", error); // <--- IMPORTANT: log the full error object
+            displayModal(`Anonymous sign-in failed: ${error.message}`, 'error'); // Changed to displayModal
+        }
+    });
+}
+
+    if (signOutBtn) { signOutBtn.addEventListener('click', async () => { /* ... */ }); }
+
+
+    // --- Auth State Listener ---
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            userId = user.uid; // Update top-level userId
+            isAuthReady = true;
+            authScreen.style.display = 'none';
+            quizWelcomeScreen.style.display = 'block';
+            userInfoEl.textContent = `Welcome, ${user.email || 'Anonymous User'}!`;
+            userStatusDisplay.style.display = 'block';
+            console.log("User is logged in:", user.uid);
+        } else {
+            userId = null; // Clear top-level userId
+            isAuthReady = true;
+            authScreen.style.display = 'flex';
+            quizWelcomeScreen.style.display = 'none';
+            userStatusDisplay.style.display = 'none';
+            console.log("User is logged out.");
+        }
+    });
+
+</script>
+</body>
+</html>
