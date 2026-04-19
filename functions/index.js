@@ -205,17 +205,18 @@ export const processQuizAnswers = onCall(
             "On a single line by itself, state ONLY the character's full name EXACTLY as it appears in the character list — in all caps, with correct spelling, nothing else on that line. " +
             "Then on the next line, add a short dramatic proclamation of 1 sentence about them.\n\n" +
             "🌟 WHY YOU ARE KINDRED SPIRITS\n" +
-            "In 3-4 sentences, explain specifically how the user's answers reveal traits they share with this character. " +
+            "In 3 sentences maximum, explain specifically how the user's answers reveal traits they share with this character. " +
             "Be vivid and imaginative — reference the world of Airdaeya, its magic, and its lore. " +
             "Make the user feel like they truly belong in this world.\n\n" +
             "✨ YOUR UNIQUE SPARK\n" +
-            "In 2-3 sentences, describe something special and unique about how the user embodies this character's spirit — " +
+            "In 2 sentences maximum, describe something special and unique about how the user embodies this character's spirit — " +
             "what makes THEIR version of this character distinctly their own. This should feel personal and uplifting.\n\n" +
             "🍽️ A TASTE OF AIRDAEYA\n" +
             "The user said their favorite food is: \"" + foodAnswer + "\". " +
-            "In 2-3 playful sentences, imagine how this food exists or would be received in the world of Airdaeya — " +
+            "In exactly 2 playful sentences, imagine how this food exists or would be received in the world of Airdaeya — " +
             "perhaps how their matched character would react to it, what magical twist it might have on Oram, " +
-            "or what it reveals about the user's adventurous spirit. Be creative, funny, and whimsical!\n\n";
+            "or what it reveals about the user's adventurous spirit. Be creative, funny, and whimsical!\n\n" +
+            "IMPORTANT: Keep your entire response under 300 words. Be concise but magical!\n\n";
 
         // 2. Fetch books to determine which are released
         const releasedBookIds = new Set();
@@ -323,17 +324,18 @@ export const processQuizAnswers = onCall(
             prompt += "\n";
         }
 
-        // Build character prompt with pre-filtered list
+        // Build character prompt with pre-filtered list — only send essential fields
         prompt += "Available Airdaeya Characters:\n";
         finalChars.forEach(charData => {
             const displayName = charData.goesBy || charData.name;
-            prompt += `- ${charData.name} (goes by: ${displayName}): ${charData.description || 'No description available.'}\n`;
+            const pronouns = charData.pronouns || 'they/them';
+            prompt += `- ${charData.name} (goes by: ${displayName}, pronouns: ${pronouns}): ${charData.description || 'No description available.'}\n`;
             if (charData.expression !== undefined) prompt += `  Expression Number: ${charData.expression}.\n`;
             if (charData.heartsDesire !== undefined) prompt += `  Hearts Desire Number: ${charData.heartsDesire}.\n`;
             if (charData.lifePath !== undefined) prompt += `  Life Path Number: ${charData.lifePath}.\n`;
             if (charData.personality !== undefined) prompt += `  Personality Number: ${charData.personality}.\n`;
         });
-        prompt += "IMPORTANT: When referring to characters in your response, always use their preferred name (goes by) rather than their full name. For example, refer to 'Ki-Llani Kunigundo Deairheann' as 'Llani', and 'Qatzsi Balaerdo' as 'Qat'.\n\n";
+        prompt += "IMPORTANT: When referring to characters in your response, always use their preferred name (goes by) and correct pronouns.\n\n";
 
         console.log("Gemini Prompt constructed:", prompt);
 
