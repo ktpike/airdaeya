@@ -599,6 +599,29 @@ h1.character-detail-name {
     filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.4));
 }
 
+/* --- Quiz Match Goes By and Aliases --- */
+.match-goes-by,
+.match-aliases {
+    font-family: var(--font-serif);
+    font-size: 1em;
+    text-align: center;
+    display: block;
+    margin: 3px auto;
+    background-image: linear-gradient(
+        to right,
+        #FFD700 0%,
+        #DAA520 25%,
+        #B8860B 50%,
+        #DAA520 75%,
+        #FFD700 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-fill-color: transparent;
+    filter: drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.3));
+}
+
 /* =================================================================================
    Oram Calendar Converter Styles
    ================================================================================= */

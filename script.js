@@ -478,13 +478,24 @@ function handleSubmitQuiz() {
 // 6. Download Functions
 // =================================================================================
 
+// Helper: load image as base64 via fetch to bypass CORS
+async function loadImageAsBase64(url) {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
 async function generatePDF(characterName, goesBy, responseText, portraitURL) {
     const btn = document.getElementById('download-pdf-btn');
     btn.textContent = 'Generating PDF...';
     btn.disabled = true;
 
     try {
-        // Load jsPDF dynamically
         if (!window.jspdf) {
             await new Promise((resolve, reject) => {
                 const script = document.createElement('script');
@@ -498,63 +509,63 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const pageW = doc.internal.pageSize.getWidth();
+        const pageH = doc.internal.pageSize.getHeight();
         const margin = 20;
         const contentW = pageW - margin * 2;
 
         // Background
-        doc.setFillColor(245, 240, 225); // --bg-color light
-        doc.rect(0, 0, pageW, doc.internal.pageSize.getHeight(), 'F');
+        doc.setFillColor(245, 240, 225);
+        doc.rect(0, 0, pageW, pageH, 'F');
 
         // Header bar
-        doc.setFillColor(69, 35, 69); // --primary-color
-        doc.rect(0, 0, pageW, 28, 'F');
+        doc.setFillColor(69, 35, 69);
+        doc.rect(0, 0, pageW, 36, 'F');
+
+        // Airdaeium icon
+        try {
+            const iconImg = await loadImageAsBase64('https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d');
+            doc.addImage(iconImg, 'PNG', 14, 5, 24, 24);
+        } catch(e) { console.warn('Icon load failed', e); }
 
         // Title
         doc.setTextColor(255, 215, 0);
-        doc.setFontSize(20);
+        doc.setFontSize(22);
         doc.setFont('helvetica', 'bold');
-        doc.text('Airdaeium', pageW / 2, 12, { align: 'center' });
-        doc.setFontSize(11);
+        doc.text('Airdaeium', pageW / 2, 17, { align: 'center' });
+        doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
-        doc.text('Your Airdaeya Personality Match', pageW / 2, 22, { align: 'center' });
+        doc.text('Your Airdaeya Personality Match', pageW / 2, 28, { align: 'center' });
 
-        let y = 38;
+        let y = 46;
 
-        // Portrait image
+        // Portrait
         if (portraitURL) {
             try {
-                const img = new Image();
-                img.crossOrigin = 'Anonymous';
-                await new Promise((res, rej) => {
-                    img.onload = res; img.onerror = rej;
-                    img.src = portraitURL;
-                });
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width; canvas.height = img.height;
-                canvas.getContext('2d').drawImage(img, 0, 0);
-                const imgData = canvas.toDataURL('image/jpeg', 0.8);
-                const imgSize = 40;
-                doc.addImage(imgData, 'JPEG', (pageW - imgSize) / 2, y, imgSize, imgSize);
-                y += imgSize + 6;
-            } catch(e) { console.warn('Could not load portrait for PDF', e); }
+                const imgData = await loadImageAsBase64(portraitURL);
+                const imgSize = 48;
+                const cx = pageW / 2;
+                doc.setDrawColor(255, 215, 0);
+                doc.setLineWidth(1.2);
+                doc.circle(cx, y + imgSize / 2, imgSize / 2 + 1.5, 'S');
+                doc.addImage(imgData, 'JPEG', cx - imgSize / 2, y, imgSize, imgSize);
+                y += imgSize + 9;
+            } catch(e) { console.warn('Portrait failed', e); y += 5; }
         }
 
         // Character name
         doc.setTextColor(69, 35, 69);
-        doc.setFontSize(16);
+        doc.setFontSize(17);
         doc.setFont('helvetica', 'bold');
         doc.text((characterName || '').toUpperCase(), pageW / 2, y, { align: 'center' });
-        y += 6;
+        y += 7;
 
         if (goesBy && goesBy !== characterName) {
             doc.setFontSize(11);
             doc.setFont('helvetica', 'italic');
-            doc.setTextColor(104, 95, 94);
-            doc.text(`Goes by: ${goesBy}`, pageW / 2, y, { align: 'center' });
-            y += 8;
-        } else {
-            y += 4;
-        }
+            doc.setTextColor(143, 97, 144);
+            doc.text('Goes by: ' + goesBy, pageW / 2, y, { align: 'center' });
+            y += 9;
+        } else { y += 3; }
 
         // Divider
         doc.setDrawColor(69, 35, 69);
@@ -562,46 +573,62 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         doc.line(margin, y, pageW - margin, y);
         y += 8;
 
-        // Response text — clean markdown
-        const cleanText = responseText
+        // Clean text - replace emoji sections with text headers
+        let cleanText = responseText
             .replace(/\*\*(.+?)\*\*/g, '$1')
-            .replace(/\*(.+?)\*/g, '$1');
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(50, 50, 50);
+            .replace(/\*(.+?)\*/g, '$1')
+            .replace(/\u2694\uFE0F YOUR AIRDAEYA MATCH/g, '[ YOUR AIRDAEYA MATCH ]')
+            .replace(/\u{1F31F} WHY YOU ARE KINDRED SPIRITS/gu, '[ WHY YOU ARE KINDRED SPIRITS ]')
+            .replace(/\u2728 YOUR UNIQUE SPARK/g, '[ YOUR UNIQUE SPARK ]')
+            .replace(/\u{1F37D}\uFE0F A TASTE OF AIRDAEYA/gu, '[ A TASTE OF AIRDAEYA ]')
+            .replace(/[\u{1F300}-\u{1FAD6}]/gu, '')
+            .replace(/[\u{2600}-\u{27BF}]/gu, '');
 
         const paragraphs = cleanText.split('\n').filter(p => p.trim());
         for (const para of paragraphs) {
-            const isHeader = para.includes('⚔️') || para.includes('🌟') || para.includes('✨') || para.includes('🍽️');
+            const isHeader = para.startsWith('[') && para.endsWith(']');
             if (isHeader) {
                 doc.setFont('helvetica', 'bold');
                 doc.setTextColor(69, 35, 69);
                 doc.setFontSize(11);
             } else {
                 doc.setFont('helvetica', 'normal');
-                doc.setTextColor(50, 50, 50);
+                doc.setTextColor(60, 50, 60);
                 doc.setFontSize(10);
             }
             const lines = doc.splitTextToSize(para, contentW);
-            if (y + lines.length * 5 > doc.internal.pageSize.getHeight() - 20) {
+            if (y + lines.length * 5 > pageH - 22) {
                 doc.addPage();
                 doc.setFillColor(245, 240, 225);
-                doc.rect(0, 0, pageW, doc.internal.pageSize.getHeight(), 'F');
+                doc.rect(0, 0, pageW, pageH, 'F');
                 y = 20;
             }
             doc.text(lines, margin, y);
-            y += lines.length * 5 + (isHeader ? 3 : 4);
+            y += lines.length * 5 + (isHeader ? 5 : 3);
         }
 
         // Footer
-        const footerY = doc.internal.pageSize.getHeight() - 12;
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'italic');
-        doc.setTextColor(143, 97, 144);
-        doc.text('ktpike.com | airdaeya.web.app', pageW / 2, footerY, { align: 'center' });
+        const footerY = pageH - 16;
+        doc.setDrawColor(195, 177, 133);
+        doc.setLineWidth(0.3);
+        doc.line(margin, footerY - 4, pageW - margin, footerY - 4);
 
-        const filename = `Airdaeium-${(goesBy || characterName || 'Match').replace(/\s+/g, '-')}.pdf`;
+        try {
+            const logoImg = await loadImageAsBase64('https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20black%20extended%20logo%20.png?alt=media&token=e1917ce9-2000-4290-9c8f-02d82bbaeb51');
+            doc.addImage(logoImg, 'PNG', (pageW - 38) / 2, footerY - 2, 38, 9);
+        } catch(e) {
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'italic');
+            doc.setTextColor(143, 97, 144);
+            doc.text('K.T. Pike | ktpike.com', pageW / 2, footerY + 4, { align: 'center' });
+        }
+
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(143, 97, 144);
+        doc.text('airdaeya.web.app', pageW / 2, footerY + 8, { align: 'center' });
+
+        const filename = 'Airdaeium-' + (goesBy || characterName || 'Match').replace(/\s+/g, '-') + '.pdf';
         doc.save(filename);
 
     } catch(e) {
@@ -631,13 +658,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
 
-        // Subtle texture overlay
-        ctx.fillStyle = 'rgba(195, 177, 133, 0.04)';
-        for (let i = 0; i < H; i += 4) {
-            ctx.fillRect(0, i, W, 2);
-        }
-
-        // Gold decorative top bar
+        // Gold bars
         const goldGrad = ctx.createLinearGradient(0, 0, W, 0);
         goldGrad.addColorStop(0, '#B8860B');
         goldGrad.addColorStop(0.3, '#FFD700');
@@ -645,122 +666,136 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         goldGrad.addColorStop(0.7, '#FFD700');
         goldGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = goldGrad;
-        ctx.fillRect(0, 0, W, 8);
-        ctx.fillRect(0, H - 8, W, 8);
+        ctx.fillRect(0, 0, W, 10);
+        ctx.fillRect(0, H - 10, W, 10);
 
-        // App title
+        // Airdaeium icon
+        try {
+            const iconData = await loadImageAsBase64('https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d');
+            const iconEl = new Image();
+            await new Promise((res, rej) => { iconEl.onload = res; iconEl.onerror = rej; iconEl.src = iconData; });
+            ctx.drawImage(iconEl, 28, 22, 72, 72);
+        } catch(e) { console.warn('Icon failed', e); }
+
+        // Title
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#FFD700';
-        ctx.font = 'bold 52px serif';
-        ctx.fillText('Airdaeium', W/2, 80);
+        const titleGrad = ctx.createLinearGradient(W * 0.2, 0, W * 0.8, 0);
+        titleGrad.addColorStop(0, '#B8860B');
+        titleGrad.addColorStop(0.5, '#FFD700');
+        titleGrad.addColorStop(1, '#B8860B');
+        ctx.fillStyle = titleGrad;
+        ctx.font = 'bold 68px Georgia, serif';
+        ctx.fillText('Airdaeium', W / 2, 92);
 
-        ctx.fillStyle = 'rgba(255,215,0,0.5)';
-        ctx.font = '24px serif';
-        ctx.fillText('Your Airdaeya Personality Match', W/2, 115);
+        ctx.fillStyle = 'rgba(255,215,0,0.55)';
+        ctx.font = 'italic 27px Georgia, serif';
+        ctx.fillText('Your Airdaeya Personality Match', W / 2, 128);
 
-        // Portrait circle
-        const centerX = W/2, portraitY = 380, radius = 180;
+        // Portrait
+        const centerX = W / 2, portraitY = 390, radius = 195;
 
-        // Glow effect
-        const glow = ctx.createRadialGradient(centerX, portraitY, radius * 0.8, centerX, portraitY, radius * 1.4);
-        glow.addColorStop(0, 'rgba(255,215,0,0.3)');
+        const glow = ctx.createRadialGradient(centerX, portraitY, radius * 0.6, centerX, portraitY, radius * 1.5);
+        glow.addColorStop(0, 'rgba(255,215,0,0.22)');
         glow.addColorStop(1, 'rgba(255,215,0,0)');
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(centerX, portraitY, radius * 1.4, 0, Math.PI * 2);
+        ctx.arc(centerX, portraitY, radius * 1.5, 0, Math.PI * 2);
         ctx.fill();
 
         if (portraitURL) {
             try {
-                const img = new Image();
-                img.crossOrigin = 'Anonymous';
-                await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = portraitURL; });
+                const imgData = await loadImageAsBase64(portraitURL);
+                const imgEl = new Image();
+                await new Promise((res, rej) => { imgEl.onload = res; imgEl.onerror = rej; imgEl.src = imgData; });
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(centerX, portraitY, radius, 0, Math.PI * 2);
                 ctx.clip();
-                ctx.drawImage(img, centerX - radius, portraitY - radius, radius * 2, radius * 2);
+                ctx.drawImage(imgEl, centerX - radius, portraitY - radius, radius * 2, radius * 2);
                 ctx.restore();
-            } catch(e) { console.warn('Portrait load failed', e); }
+            } catch(e) { console.warn('Portrait failed', e); }
         }
 
         // Gold circle border
-        ctx.strokeStyle = '#FFD700';
-        ctx.lineWidth = 6;
+        const borderGrad = ctx.createLinearGradient(centerX - radius, 0, centerX + radius, 0);
+        borderGrad.addColorStop(0, '#B8860B');
+        borderGrad.addColorStop(0.5, '#FFD700');
+        borderGrad.addColorStop(1, '#B8860B');
+        ctx.strokeStyle = borderGrad;
+        ctx.lineWidth = 8;
         ctx.beginPath();
         ctx.arc(centerX, portraitY, radius, 0, Math.PI * 2);
         ctx.stroke();
 
         // Character name
         const displayName = (goesBy || characterName || '').toUpperCase();
-        const nameGrad = ctx.createLinearGradient(W*0.2, 0, W*0.8, 0);
+        const nameGrad = ctx.createLinearGradient(W * 0.1, 0, W * 0.9, 0);
         nameGrad.addColorStop(0, '#B8860B');
         nameGrad.addColorStop(0.3, '#FFD700');
         nameGrad.addColorStop(0.5, '#DAA520');
         nameGrad.addColorStop(0.7, '#FFD700');
         nameGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = nameGrad;
-        ctx.font = 'bold 58px serif';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 8;
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 10;
 
-        // Auto-shrink name if too long
-        let nameFontSize = 58;
-        ctx.font = `bold ${nameFontSize}px serif`;
-        while (ctx.measureText(displayName).width > W - 80 && nameFontSize > 32) {
+        let nameFontSize = 74;
+        ctx.font = 'bold ' + nameFontSize + 'px Georgia, serif';
+        while (ctx.measureText(displayName).width > W - 100 && nameFontSize > 36) {
             nameFontSize -= 2;
-            ctx.font = `bold ${nameFontSize}px serif`;
+            ctx.font = 'bold ' + nameFontSize + 'px Georgia, serif';
         }
-        ctx.fillText(displayName, W/2, 620);
+        ctx.fillText(displayName, W / 2, 648);
         ctx.shadowBlur = 0;
 
-        // Proclamation text
+        // Proclamation
         if (proclamation) {
-            ctx.fillStyle = 'rgba(195,177,133,0.9)';
-            ctx.font = 'italic 28px serif';
-            const maxWidth = W - 120;
+            ctx.fillStyle = 'rgba(195,177,133,0.92)';
+            ctx.font = 'italic 30px Georgia, serif';
+            const maxWidth = W - 140;
             const words = proclamation.split(' ');
-            let line = '', procY = 675;
+            let line = '', procY = 705;
             for (const word of words) {
                 const test = line + (line ? ' ' : '') + word;
                 if (ctx.measureText(test).width > maxWidth && line) {
-                    ctx.fillText(line, W/2, procY);
-                    line = word; procY += 38;
+                    ctx.fillText(line, W / 2, procY);
+                    line = word;
+                    procY += 42;
                 } else { line = test; }
             }
-            ctx.fillText(line, W/2, procY);
+            if (line) ctx.fillText(line, W / 2, procY);
         }
 
-        // Decorative divider
-        ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+        // Divider
+        ctx.strokeStyle = 'rgba(255,215,0,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(W*0.2, 870); ctx.lineTo(W*0.8, 870);
+        ctx.moveTo(W * 0.15, 880);
+        ctx.lineTo(W * 0.85, 880);
         ctx.stroke();
 
         // KT Pike logo
         try {
-            const logo = new Image();
-            logo.crossOrigin = 'Anonymous';
-            const logoURL = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775';
-            await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = logoURL; });
-            const logoH = 45;
-            const logoW = logo.width * (logoH / logo.height);
-            ctx.drawImage(logo, (W - logoW) / 2, 890, logoW, logoH);
+            const logoData = await loadImageAsBase64('https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775');
+            const logoEl = new Image();
+            await new Promise((res, rej) => { logoEl.onload = res; logoEl.onerror = rej; logoEl.src = logoData; });
+            const logoH = 54;
+            const logoW = logoEl.width * (logoH / logoEl.height);
+            ctx.drawImage(logoEl, (W - logoW) / 2, 893, logoW, logoH);
         } catch(e) {
-            ctx.fillStyle = 'rgba(255,215,0,0.6)';
-            ctx.font = '22px serif';
-            ctx.fillText('K.T. Pike', W/2, 915);
+            ctx.fillStyle = 'rgba(255,215,0,0.7)';
+            ctx.font = '28px Georgia, serif';
+            ctx.fillText('K.T. Pike', W / 2, 935);
         }
 
         // Website
-        ctx.fillStyle = 'rgba(195,177,133,0.6)';
-        ctx.font = '20px sans-serif';
-        ctx.fillText('Find your match at airdaeya.web.app', W/2, 960);
+        ctx.fillStyle = 'rgba(195,177,133,0.65)';
+        ctx.font = '22px Arial, sans-serif';
+        ctx.fillText('Find your match at airdaeya.web.app', W / 2, 975);
 
         // Download
         const link = document.createElement('a');
-        link.download = `Airdaeium-${(goesBy || characterName || 'Match').replace(/\s+/g, '-')}.png`;
+        link.download = 'Airdaeium-' + (goesBy || characterName || 'Match').replace(/\s+/g, '-') + '.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
 
@@ -772,6 +807,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         btn.disabled = false;
     }
 }
+
 
 // =================================================================================
 // 6. DOMContentLoaded Listener
