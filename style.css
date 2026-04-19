@@ -815,3 +815,59 @@ h1.character-detail-name {
     grid-template-columns: 1fr 1fr;
     gap: 10px;
 }
+
+/* =================================================================================
+   Mobile Responsive Fixes
+   ================================================================================= */
+
+@media (max-width: 480px) {
+    /* Stack quiz nav buttons vertically on narrow screens */
+    .quiz-navigation {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .quiz-nav-button {
+        width: 100%;
+        text-align: center;
+    }
+
+    /* Shrink quiz question font on mobile */
+    .quiz-container .quiz-question-text {
+        font-size: 1.3em;
+    }
+
+    /* Make answer buttons easier to tap */
+    .quiz-answer-button {
+        padding: 18px 15px;
+        font-size: 1em;
+    }
+
+    /* Shrink match portrait on mobile */
+    .match-portrait {
+        width: 150px;
+        height: 150px;
+    }
+
+    /* Shrink character name on mobile */
+    .match-character-name {
+        font-size: 1.5em !important;
+        letter-spacing: 0.08em !important;
+    }
+
+    /* Calendar converters stack on mobile */
+    .calendar-converters {
+        grid-template-columns: 1fr;
+    }
+
+    /* Shrink header title on mobile */
+    .app-header h1 {
+        font-size: 1.6em;
+    }
+
+    /* Make container padding smaller */
+    .container {
+        padding: 12px;
+        margin: 15px auto;
+    }
+}
