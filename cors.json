@@ -1,0 +1,7 @@
+[
+  {
+    "origin": ["https://airdaeya.web.app", "https://airdaeya.firebaseapp.com", "http://localhost"],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600
+  }
+]
