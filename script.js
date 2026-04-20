@@ -377,7 +377,7 @@ function handleSubmitQuiz() {
     characterDisplayArea.innerHTML = `
         <div class="quiz-results-loading">
             <h2>Processing your personality...</h2>
-            <p>Gemini is consulting the stars of Airdaeya...</p>
+            <p>Consulting the stars of Airdaeya...</p>
             <div class="loading-spinner"></div>
         </div>
     `;
@@ -761,7 +761,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             nameFontSize -= 2;
             ctx.font = `bold ${nameFontSize}px Georgia, serif`;
         }
-        ctx.fillText(displayName, W/2, 668);
+        ctx.fillText(displayName, W/2, 692);
         ctx.shadowBlur = 0;
 
         // Proclamation — word wrap, bigger font
@@ -781,7 +781,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             }
             if (currentLine) procLines.push(currentLine);
             const lineHeight = 44;
-            let procY = 722;
+            let procY = 746;
             for (const pl of procLines) {
                 ctx.fillText(pl, W/2, procY);
                 procY += lineHeight;
@@ -792,7 +792,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         ctx.strokeStyle = 'rgba(255,215,0,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(W*0.15, 870); ctx.lineTo(W*0.85, 870);
+        ctx.moveTo(W*0.15, 894); ctx.lineTo(W*0.85, 894);
         ctx.stroke();
 
         // KT Pike logo
@@ -800,19 +800,19 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             const logo = new Image();
             logo.crossOrigin = 'Anonymous';
             await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775'; });
-            const logoH = 50;
+            const logoH = 65;
             const logoW = logo.width * (logoH / logo.height);
-            ctx.drawImage(logo, (W - logoW) / 2, 882, logoW, logoH);
+            ctx.drawImage(logo, (W - logoW) / 2, 906, logoW, logoH);
         } catch(e) {
             ctx.fillStyle = 'rgba(255,215,0,0.7)';
             ctx.font = '28px Georgia, serif';
-            ctx.fillText('K.T. Pike', W/2, 920);
+            ctx.fillText('K.T. Pike', W/2, 944);
         }
 
         // Website
         ctx.fillStyle = 'rgba(195,177,133,0.65)';
         ctx.font = '24px Arial, sans-serif';
-        ctx.fillText('Find your match at airdaeya.web.app', W/2, 950);
+        ctx.fillText('Find your match at airdaeya.web.app', W/2, 974);
 
         // Download
         const link = document.createElement('a');
