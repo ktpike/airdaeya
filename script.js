@@ -31,6 +31,49 @@ let currentQuestionIndex = 0;
 let userAnswers = {};
 
 // =================================================================================
+// 2b. Character Birthday Cache
+// =================================================================================
+let characterBirthdays = null; // null = not yet loaded, [] = loaded but empty
+
+async function loadCharacterBirthdays() {
+    if (characterBirthdays !== null) return; // already loaded
+    try {
+        const snapshot = await db.collection('characters').get();
+        characterBirthdays = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            if (!data.birthday) return;
+            // Parse "year: 14887, tritquarter: 5, day: 13"
+            const tqMatch = data.birthday.match(/tritquarter:\s*(\d+)/i);
+            const dayMatch = data.birthday.match(/day:\s*(\d+)/i);
+            if (tqMatch && dayMatch) {
+                characterBirthdays.push({
+                    name: data.goesBy || data.name || 'Unknown',
+                    tq: parseInt(tqMatch[1]),
+                    day: parseInt(dayMatch[1])
+                });
+            }
+        });
+        console.log(`Loaded ${characterBirthdays.length} character birthdays.`);
+    } catch (e) {
+        console.warn('Could not load character birthdays:', e);
+        characterBirthdays = [];
+    }
+}
+
+function getBirthdayCharacters(tqNumber, day) {
+    if (!characterBirthdays) return [];
+    return characterBirthdays.filter(b => b.tq === tqNumber && b.day === day);
+}
+
+function renderBirthdayMessage(characters) {
+    if (!characters || characters.length === 0) return '';
+    const names = characters.map(c => c.name).join(' & ');
+    const emoji = characters.length === 1 ? '🎂' : '🎉';
+    return `<div class="today-special">${emoji} Happy Birthday, ${names}!</div>`;
+}
+
+// =================================================================================
 // 3. Theme Toggle Logic
 // =================================================================================
 
@@ -761,13 +804,13 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             nameFontSize -= 2;
             ctx.font = `bold ${nameFontSize}px Georgia, serif`;
         }
-        ctx.fillText(displayName, W/2, 718);
+        ctx.fillText(displayName, W/2, 692);
         ctx.shadowBlur = 0;
 
         // Proclamation — word wrap, bigger font
         if (proclamation) {
             ctx.fillStyle = 'rgba(195,177,133,0.92)';
-            ctx.font = 'italic 42px Georgia, serif';
+            ctx.font = 'italic 34px Georgia, serif';
             const maxWidth = W - 100;
             const words = proclamation.split(' ');
             const procLines = [];
@@ -780,8 +823,8 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
                 } else { currentLine = test; }
             }
             if (currentLine) procLines.push(currentLine);
-            const lineHeight = 54;
-            let procY = 782;
+            const lineHeight = 44;
+            let procY = 746;
             for (const pl of procLines) {
                 ctx.fillText(pl, W/2, procY);
                 procY += lineHeight;
@@ -792,7 +835,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         ctx.strokeStyle = 'rgba(255,215,0,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(W*0.15, 918); ctx.lineTo(W*0.85, 918);
+        ctx.moveTo(W*0.15, 894); ctx.lineTo(W*0.85, 894);
         ctx.stroke();
 
         // KT Pike logo
@@ -800,19 +843,19 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             const logo = new Image();
             logo.crossOrigin = 'Anonymous';
             await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775'; });
-            const logoH = 85;
+            const logoH = 65;
             const logoW = logo.width * (logoH / logo.height);
-            ctx.drawImage(logo, (W - logoW) / 2, 928, logoW, logoH);
+            ctx.drawImage(logo, (W - logoW) / 2, 906, logoW, logoH);
         } catch(e) {
             ctx.fillStyle = 'rgba(255,215,0,0.7)';
-            ctx.font = '36px Georgia, serif';
-            ctx.fillText('K.T. Pike', W/2, 978);
+            ctx.font = '28px Georgia, serif';
+            ctx.fillText('K.T. Pike', W/2, 944);
         }
 
         // Website
         ctx.fillStyle = 'rgba(195,177,133,0.65)';
-        ctx.font = '30px Arial, sans-serif';
-        ctx.fillText('Find your match at airdaeya.web.app', W/2, 1032);
+        ctx.font = '24px Arial, sans-serif';
+        ctx.fillText('Find your match at airdaeya.web.app', W/2, 974);
 
         // Download
         const link = document.createElement('a');
@@ -1017,21 +1060,27 @@ function displayOramCalendar() {
 
     document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
 
-    // Populate today panel
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Strip time
-    const oramDayOfYear = earthDateToOramDayOfYear(today);
-    const { tq, day, special, seasonEmoji } = buildOramResult(oramDayOfYear);
-    const todayPanel = document.getElementById('today-panel');
-    todayPanel.innerHTML = `
-        <div class="today-label">Today on Earth</div>
-        <div class="today-earth">${formatEarthDate(today)}</div>
-        <div class="today-divider">⟡</div>
-        <div class="today-label">Today on Oram</div>
-        <div class="today-oram">${formatOramDate(tq, day)}</div>
-        <div class="today-season">${seasonEmoji} ${tq.season} on Oram</div>
-        ${special ? `<div class="today-special">✨ ${special.name} — ${special.desc}</div>` : ''}
-    `;
+    // Load birthdays then populate today panel
+    loadCharacterBirthdays().then(() => {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const oramDayOfYear = earthDateToOramDayOfYear(today);
+        const { tq, day, special, seasonEmoji } = buildOramResult(oramDayOfYear);
+        const birthdays = getBirthdayCharacters(tq.number, day);
+        const todayPanel = document.getElementById('today-panel');
+        if (todayPanel) {
+            todayPanel.innerHTML = `
+                <div class="today-label">Today on Earth</div>
+                <div class="today-earth">${formatEarthDate(today)}</div>
+                <div class="today-divider">⟡</div>
+                <div class="today-label">Today on Oram</div>
+                <div class="today-oram">${formatOramDate(tq, day)}</div>
+                <div class="today-season">${seasonEmoji} ${tq.season} on Oram</div>
+                ${special ? `<div class="today-special">✨ ${special.name} — ${special.desc}</div>` : ''}
+                ${renderBirthdayMessage(birthdays)}
+            `;
+        }
+    });
 
     // Earth to Oram converter
     document.getElementById('earth-to-oram-btn').addEventListener('click', () => {
@@ -1041,6 +1090,7 @@ function displayOramCalendar() {
         const earthDate = new Date(parts[0], parts[1] - 1, parts[2]);
         const oramDay = earthDateToOramDayOfYear(earthDate);
         const { tq, day: oDay, special, seasonEmoji } = buildOramResult(oramDay);
+        const birthdays = getBirthdayCharacters(tq.number, oDay);
         const resultEl = document.getElementById('earth-to-oram-result');
         document.getElementById('earth-to-oram-date').textContent = formatOramDate(tq, oDay);
         document.getElementById('earth-to-oram-season').textContent = `${seasonEmoji} ${tq.season} on Oram`;
@@ -1051,6 +1101,14 @@ function displayOramCalendar() {
         } else {
             specialEl.style.display = 'none';
         }
+        // Birthday message
+        let bdayEl = document.getElementById('earth-to-oram-birthday');
+        if (!bdayEl) {
+            bdayEl = document.createElement('div');
+            bdayEl.id = 'earth-to-oram-birthday';
+            resultEl.appendChild(bdayEl);
+        }
+        bdayEl.innerHTML = renderBirthdayMessage(birthdays);
         resultEl.classList.add('visible');
     });
 
@@ -1063,6 +1121,7 @@ function displayOramCalendar() {
         const tq = ORAM_CALENDAR.tritquarters[tqNumber - 1];
         const special = getSpecialDay(tqNumber, oDay);
         const seasonEmoji = ORAM_CALENDAR.seasonEmoji[tq.season];
+        const birthdays = getBirthdayCharacters(tqNumber, oDay);
         const resultEl = document.getElementById('oram-to-earth-result');
         document.getElementById('oram-to-earth-date').textContent = formatEarthDate(earthDate);
         document.getElementById('oram-to-earth-season').textContent = `${seasonEmoji} ${tq.season} on Oram`;
@@ -1073,6 +1132,14 @@ function displayOramCalendar() {
         } else {
             specialEl.style.display = 'none';
         }
+        // Birthday message
+        let bdayEl = document.getElementById('oram-to-earth-birthday');
+        if (!bdayEl) {
+            bdayEl = document.createElement('div');
+            bdayEl.id = 'oram-to-earth-birthday';
+            resultEl.appendChild(bdayEl);
+        }
+        bdayEl.innerHTML = renderBirthdayMessage(birthdays);
         resultEl.classList.add('visible');
     });
 }
