@@ -509,17 +509,6 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         doc.setFillColor(69, 35, 69); // --primary-color
         doc.rect(0, 0, pageW, 28, 'F');
 
-        // Airdaeium icon in header
-        try {
-            const iconImg = new Image();
-            iconImg.crossOrigin = 'Anonymous';
-            await new Promise((res, rej) => { iconImg.onload = res; iconImg.onerror = rej; iconImg.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d'; });
-            const iconCanvas = document.createElement('canvas');
-            iconCanvas.width = iconImg.width; iconCanvas.height = iconImg.height;
-            iconCanvas.getContext('2d').drawImage(iconImg, 0, 0);
-            doc.addImage(iconCanvas.toDataURL('image/png'), 'PNG', 12, 4, 20, 20);
-        } catch(e) { console.warn('Icon load failed', e); }
-
         // Title
         doc.setTextColor(255, 215, 0);
         doc.setFontSize(20);
@@ -529,61 +518,63 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         doc.setFont('helvetica', 'normal');
         doc.text('Your Airdaeya Personality Match', pageW / 2, 22, { align: 'center' });
 
+        // Airdaeium icon in header
+        try {
+            const iconImg = new Image();
+            iconImg.crossOrigin = 'Anonymous';
+            await new Promise((res, rej) => { iconImg.onload = res; iconImg.onerror = rej; iconImg.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d'; });
+            const iconC = document.createElement('canvas');
+            iconC.width = iconImg.width; iconC.height = iconImg.height;
+            iconC.getContext('2d').drawImage(iconImg, 0, 0);
+            doc.addImage(iconC.toDataURL('image/png'), 'PNG', 12, 4, 20, 20);
+        } catch(e) { console.warn('Icon load failed', e); }
+
         let y = 38;
 
-        // Portrait image
+        // Portrait — square with rounded corners and gold border
         if (portraitURL) {
             try {
                 const img = new Image();
                 img.crossOrigin = 'Anonymous';
-                await new Promise((res, rej) => {
-                    img.onload = res; img.onerror = rej;
-                    img.src = portraitURL;
-                });
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width; canvas.height = img.height;
-                canvas.getContext('2d').drawImage(img, 0, 0);
-                const imgData = canvas.toDataURL('image/jpeg', 0.85);
-                const imgSize = 50;
-                const cx = pageW / 2;
-                const cy = y + imgSize / 2;
-                // Clip to circle
-                doc.saveGraphicsState();
-                doc.circle(cx, cy, imgSize / 2, 'S');
-                doc.addImage(imgData, 'JPEG', cx - imgSize/2, y, imgSize, imgSize);
-                doc.restoreGraphicsState();
-                // Gold border
+                await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = portraitURL; });
+                const imgC = document.createElement('canvas');
+                imgC.width = img.width; imgC.height = img.height;
+                imgC.getContext('2d').drawImage(img, 0, 0);
+                const imgData = imgC.toDataURL('image/jpeg', 0.85);
+                const imgSize = 55;
+                const imgX = (pageW - imgSize) / 2;
+                const r = 3; // border radius
+                // Gold border (rounded rect)
                 doc.setDrawColor(255, 215, 0);
-                doc.setLineWidth(1.0);
-                doc.circle(cx, cy, imgSize / 2 + 0.5);
+                doc.setLineWidth(1.2);
+                doc.roundedRect(imgX - 1, y - 1, imgSize + 2, imgSize + 2, r, r, 'S');
+                doc.addImage(imgData, 'JPEG', imgX, y, imgSize, imgSize, undefined, undefined, undefined, [r, r, r, r]);
                 y += imgSize + 8;
-            } catch(e) { console.warn('Could not load portrait for PDF', e); }
+            } catch(e) { console.warn('Portrait failed', e); y += 5; }
         }
 
         // Character name
         doc.setTextColor(69, 35, 69);
-        doc.setFontSize(16);
+        doc.setFontSize(17);
         doc.setFont('helvetica', 'bold');
         doc.text((characterName || '').toUpperCase(), pageW / 2, y, { align: 'center' });
-        y += 6;
+        y += 7;
 
         if (goesBy && goesBy !== characterName) {
             doc.setFontSize(11);
             doc.setFont('helvetica', 'italic');
-            doc.setTextColor(104, 95, 94);
-            doc.text(`Goes by: ${goesBy}`, pageW / 2, y, { align: 'center' });
-            y += 8;
-        } else {
-            y += 4;
-        }
+            doc.setTextColor(143, 97, 144);
+            doc.text('Goes by: ' + goesBy, pageW / 2, y, { align: 'center' });
+            y += 9;
+        } else { y += 3; }
 
         // Divider
         doc.setDrawColor(69, 35, 69);
         doc.setLineWidth(0.5);
         doc.line(margin, y, pageW - margin, y);
-        y += 8;
+        y += 7;
 
-        // Response text — clean markdown and replace emojis with text headers
+        // Response text — strip emojis, replace section headers
         const sectionHeaders = ['YOUR AIRDAEYA MATCH', 'WHY YOU ARE KINDRED SPIRITS', 'YOUR UNIQUE SPARK', 'A TASTE OF AIRDAEYA'];
         let cleanText = responseText
             .replace(/\*\*(.+?)\*\*/g, '$1')
@@ -619,24 +610,22 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         }
 
         // Footer with KT Pike logo
-        const pageH = doc.internal.pageSize.getHeight();
-        const footerY = pageH - 16;
+        const pageH_pdf = doc.internal.pageSize.getHeight();
+        const footerY = pageH_pdf - 16;
         doc.setDrawColor(195, 177, 133);
         doc.setLineWidth(0.3);
         doc.line(margin, footerY - 4, pageW - margin, footerY - 4);
-
         try {
-            const logoImg2 = new Image();
-            logoImg2.crossOrigin = 'Anonymous';
-            await new Promise((res, rej) => { logoImg2.onload = res; logoImg2.onerror = rej; logoImg2.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20black%20extended%20logo%20.png?alt=media&token=e1917ce9-2000-4290-9c8f-02d82bbaeb51'; });
-            const logoCanvas2 = document.createElement('canvas');
-            logoCanvas2.width = logoImg2.width; logoCanvas2.height = logoImg2.height;
-            logoCanvas2.getContext('2d').drawImage(logoImg2, 0, 0);
-            const logoData2 = logoCanvas2.toDataURL('image/png');
-            const logoAspect = logoImg2.width / logoImg2.height;
-            const logoH2 = 8;
-            const logoW2 = logoH2 * logoAspect;
-            doc.addImage(logoData2, 'PNG', (pageW - logoW2) / 2, footerY - 2, logoW2, logoH2);
+            const logoImg = new Image();
+            logoImg.crossOrigin = 'Anonymous';
+            await new Promise((res, rej) => { logoImg.onload = res; logoImg.onerror = rej; logoImg.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20black%20extended%20logo%20.png?alt=media&token=e1917ce9-2000-4290-9c8f-02d82bbaeb51'; });
+            const logoC = document.createElement('canvas');
+            logoC.width = logoImg.width; logoC.height = logoImg.height;
+            logoC.getContext('2d').drawImage(logoImg, 0, 0);
+            const logoAspect = logoImg.width / logoImg.height;
+            const logoH_pdf = 8;
+            const logoW_pdf = logoH_pdf * logoAspect;
+            doc.addImage(logoC.toDataURL('image/png'), 'PNG', (pageW - logoW_pdf) / 2, footerY - 2, logoW_pdf, logoH_pdf);
         } catch(e) {
             doc.setFontSize(8);
             doc.setFont('helvetica', 'italic');
@@ -684,7 +673,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             ctx.fillRect(0, i, W, 2);
         }
 
-        // Gold decorative top bar
+        // Gold decorative top/bottom bars
         const goldGrad = ctx.createLinearGradient(0, 0, W, 0);
         goldGrad.addColorStop(0, '#B8860B');
         goldGrad.addColorStop(0.3, '#FFD700');
@@ -692,29 +681,41 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         goldGrad.addColorStop(0.7, '#FFD700');
         goldGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = goldGrad;
-        ctx.fillRect(0, 18, W, 10);
-        ctx.fillRect(0, H - 28, W, 10);
+        ctx.fillRect(0, 18, W, 12);
+        ctx.fillRect(0, H - 30, W, 12);
+
+        // Airdaeium icon top-left
+        try {
+            const icon = new Image();
+            icon.crossOrigin = 'Anonymous';
+            await new Promise((res, rej) => { icon.onload = res; icon.onerror = rej; icon.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d'; });
+            ctx.drawImage(icon, 30, 38, 80, 80);
+        } catch(e) { console.warn('Icon failed', e); }
 
         // App title
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#FFD700';
-        ctx.font = 'bold 52px serif';
-        ctx.fillText('Airdaeium', W/2, 95);
+        const titleGrad = ctx.createLinearGradient(W*0.2, 0, W*0.8, 0);
+        titleGrad.addColorStop(0, '#B8860B');
+        titleGrad.addColorStop(0.5, '#FFD700');
+        titleGrad.addColorStop(1, '#B8860B');
+        ctx.fillStyle = titleGrad;
+        ctx.font = 'bold 72px Georgia, serif';
+        ctx.fillText('Airdaeium', W/2, 100);
 
-        ctx.fillStyle = 'rgba(255,215,0,0.5)';
-        ctx.font = '24px serif';
-        ctx.fillText('Your Airdaeya Personality Match', W/2, 132);
+        ctx.fillStyle = 'rgba(255,215,0,0.6)';
+        ctx.font = 'italic 30px Georgia, serif';
+        ctx.fillText('Your Airdaeya Personality Match', W/2, 140);
 
-        // Portrait circle
-        const centerX = W/2, portraitY = 380, radius = 180;
+        // Portrait circle — bigger
+        const centerX = W/2, portraitY = 400, radius = 210;
 
         // Glow effect
-        const glow = ctx.createRadialGradient(centerX, portraitY, radius * 0.8, centerX, portraitY, radius * 1.4);
-        glow.addColorStop(0, 'rgba(255,215,0,0.3)');
+        const glow = ctx.createRadialGradient(centerX, portraitY, radius * 0.7, centerX, portraitY, radius * 1.5);
+        glow.addColorStop(0, 'rgba(255,215,0,0.25)');
         glow.addColorStop(1, 'rgba(255,215,0,0)');
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(centerX, portraitY, radius * 1.4, 0, Math.PI * 2);
+        ctx.arc(centerX, portraitY, radius * 1.5, 0, Math.PI * 2);
         ctx.fill();
 
         if (portraitURL) {
@@ -732,78 +733,86 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         }
 
         // Gold circle border
-        ctx.strokeStyle = '#FFD700';
-        ctx.lineWidth = 6;
+        const borderGrad = ctx.createLinearGradient(centerX - radius, 0, centerX + radius, 0);
+        borderGrad.addColorStop(0, '#B8860B');
+        borderGrad.addColorStop(0.5, '#FFD700');
+        borderGrad.addColorStop(1, '#B8860B');
+        ctx.strokeStyle = borderGrad;
+        ctx.lineWidth = 9;
         ctx.beginPath();
         ctx.arc(centerX, portraitY, radius, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Character name
+        // Character name — bigger
         const displayName = (goesBy || characterName || '').toUpperCase();
-        const nameGrad = ctx.createLinearGradient(W*0.2, 0, W*0.8, 0);
+        const nameGrad = ctx.createLinearGradient(W*0.1, 0, W*0.9, 0);
         nameGrad.addColorStop(0, '#B8860B');
         nameGrad.addColorStop(0.3, '#FFD700');
         nameGrad.addColorStop(0.5, '#DAA520');
         nameGrad.addColorStop(0.7, '#FFD700');
         nameGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = nameGrad;
-        ctx.font = 'bold 58px serif';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 8;
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 10;
 
-        // Auto-shrink name if too long
-        let nameFontSize = 58;
-        ctx.font = `bold ${nameFontSize}px serif`;
-        while (ctx.measureText(displayName).width > W - 80 && nameFontSize > 32) {
+        let nameFontSize = 80;
+        ctx.font = `bold ${nameFontSize}px Georgia, serif`;
+        while (ctx.measureText(displayName).width > W - 80 && nameFontSize > 36) {
             nameFontSize -= 2;
-            ctx.font = `bold ${nameFontSize}px serif`;
+            ctx.font = `bold ${nameFontSize}px Georgia, serif`;
         }
-        ctx.fillText(displayName, W/2, 638);
+        ctx.fillText(displayName, W/2, 668);
         ctx.shadowBlur = 0;
 
-        // Proclamation text
+        // Proclamation — word wrap, bigger font
         if (proclamation) {
-            ctx.fillStyle = 'rgba(195,177,133,0.9)';
-            ctx.font = 'italic 28px serif';
-            const maxWidth = W - 120;
+            ctx.fillStyle = 'rgba(195,177,133,0.92)';
+            ctx.font = 'italic 34px Georgia, serif';
+            const maxWidth = W - 100;
             const words = proclamation.split(' ');
-            let line = '', procY = 695;
+            const procLines = [];
+            let currentLine = '';
             for (const word of words) {
-                const test = line + (line ? ' ' : '') + word;
-                if (ctx.measureText(test).width > maxWidth && line) {
-                    ctx.fillText(line, W/2, procY);
-                    line = word; procY += 38;
-                } else { line = test; }
+                const test = currentLine + (currentLine ? ' ' : '') + word;
+                if (ctx.measureText(test).width > maxWidth && currentLine) {
+                    procLines.push(currentLine);
+                    currentLine = word;
+                } else { currentLine = test; }
             }
-            ctx.fillText(line, W/2, procY);
+            if (currentLine) procLines.push(currentLine);
+            const lineHeight = 44;
+            let procY = 722;
+            for (const pl of procLines) {
+                ctx.fillText(pl, W/2, procY);
+                procY += lineHeight;
+            }
         }
 
         // Decorative divider
-        ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+        ctx.strokeStyle = 'rgba(255,215,0,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(W*0.2, 860); ctx.lineTo(W*0.8, 860);
+        ctx.moveTo(W*0.15, 870); ctx.lineTo(W*0.85, 870);
         ctx.stroke();
 
         // KT Pike logo
         try {
             const logo = new Image();
             logo.crossOrigin = 'Anonymous';
-            const logoURL = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775';
-            await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = logoURL; });
-            const logoH = 45;
+            await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775'; });
+            const logoH = 50;
             const logoW = logo.width * (logoH / logo.height);
-            ctx.drawImage(logo, (W - logoW) / 2, 873, logoW, logoH);
+            ctx.drawImage(logo, (W - logoW) / 2, 882, logoW, logoH);
         } catch(e) {
-            ctx.fillStyle = 'rgba(255,215,0,0.6)';
-            ctx.font = '22px serif';
-            ctx.fillText('K.T. Pike', W/2, 915);
+            ctx.fillStyle = 'rgba(255,215,0,0.7)';
+            ctx.font = '28px Georgia, serif';
+            ctx.fillText('K.T. Pike', W/2, 920);
         }
 
         // Website
-        ctx.fillStyle = 'rgba(195,177,133,0.6)';
-        ctx.font = '20px sans-serif';
-        ctx.fillText('Find your match at airdaeya.web.app', W/2, 945);
+        ctx.fillStyle = 'rgba(195,177,133,0.65)';
+        ctx.font = '24px Arial, sans-serif';
+        ctx.fillText('Find your match at airdaeya.web.app', W/2, 950);
 
         // Download
         const link = document.createElement('a');
