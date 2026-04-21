@@ -138,68 +138,245 @@ async function displayCharacterList() {
     characterDisplayArea.innerHTML = `<h2>Loading characters...</h2>`;
 
     try {
+        // ── Step 1: Fetch all characters (top-level collection) ──────────────
         const charactersSnapshot = await db.collection('characters').get();
+        const allCharacters = [];
+        charactersSnapshot.forEach(doc => {
+            allCharacters.push({ id: doc.id, ...doc.data() });
+        });
 
-        if (!charactersSnapshot.empty) {
-            characterDisplayArea.innerHTML = `
-                <button class="back-button" id="back-to-home-btn">← Back to Home</button>
-                <h1>All Characters</h1>
-                <div class="character-list-grid"></div>
-            `;
+        // ── Step 2: Collect all unique book references across all characters ──
+        // Each character has a bookAppearances array of { bookID (reference), role (string) }
+        const bookRefPaths = new Set();
+        for (const char of allCharacters) {
+            if (!Array.isArray(char.bookAppearances)) continue;
+            for (const appearance of char.bookAppearances) {
+                if (appearance.bookID && appearance.bookID.path) {
+                    bookRefPaths.add(appearance.bookID.path);
+                }
+            }
+        }
 
-            document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+        // ── Step 3: Fetch all referenced book documents ──────────────────────
+        // bookMap: full Firestore path → book data
+        const bookMap = {};
+        await Promise.all([...bookRefPaths].map(async (path) => {
+            try {
+                const bookDoc = await db.doc(path).get();
+                if (bookDoc.exists) {
+                    bookMap[path] = { _path: path, ...bookDoc.data() };
+                }
+            } catch (e) {
+                console.warn(`Could not fetch book at ${path}:`, e);
+            }
+        }));
 
-            const characterListGrid = characterDisplayArea.querySelector('.character-list-grid');
+        // ── Step 4: Helpers ──────────────────────────────────────────────────
 
-            charactersSnapshot.forEach(doc => {
-                const characterData = doc.data();
-                const characterId = doc.id;
+        // Parse the book's releaseDate string e.g. "October 28, 2025"
+        function parseReleaseDate(book) {
+            if (!book || !book.releaseDate) return null;
+            const d = new Date(book.releaseDate);
+            return isNaN(d.getTime()) ? null : d;
+        }
 
-                const characterListItem = document.createElement('div');
-                characterListItem.classList.add('character-list-item');
-                characterListItem.dataset.characterId = characterId;
+        // A book is "released" if its `released` boolean is true OR its releaseDate is in the past
+        const now = new Date();
+        function isBookReleased(book) {
+            if (!book) return false;
+            if (book.released === true) return true;
+            const rd = parseReleaseDate(book);
+            return rd !== null && rd <= now;
+        }
 
-                characterListItem.addEventListener('click', () => {
-                    displayCharacterDetails(characterId);
-                });
+        // A book has a release date set at all (past or future) — needed to show future books
+        function bookHasReleaseDate(book) {
+            return book && !!book.releaseDate;
+        }
 
-                const characterNameElement = document.createElement('h3');
-                characterNameElement.textContent = characterData.name;
+        // ── Step 5: For each character, find their first RELEASED book appearance
+        // This is the book they'll be listed under on the character list.
+        // We also grab the role from that same appearance entry.
+        // Characters with no released book appearance are hidden entirely.
 
-                const characterDescriptionElement = document.createElement('p');
-                const shortDescription = characterData.description ? characterData.description.substring(0, 150) + '...' : 'No description available.';
-                characterDescriptionElement.textContent = shortDescription;
+        const ROLE_ORDER = { 'POV': 0, 'Primary': 1, 'Secondary': 2 };
 
-                const characterImageElement = document.createElement('img');
-                if (characterData.portraitURL || characterData.drakkaenPortraitURL) {
-                    characterImageElement.src = characterData.portraitURL || characterData.drakkaenPortraitURL;
-                    characterImageElement.alt = `Portrait of ${characterData.name}`;
-                    characterImageElement.classList.add('character-list-portrait');
+        // Enrich each character with { _firstBookPath, _firstBook, _listRole }
+        const enrichedCharacters = [];
+        for (const char of allCharacters) {
+            if (!Array.isArray(char.bookAppearances) || char.bookAppearances.length === 0) continue;
+            // Walk appearances in order — first released book wins
+            for (const appearance of char.bookAppearances) {
+                const path = appearance.bookID && appearance.bookID.path;
+                if (!path) continue;
+                const book = bookMap[path];
+                if (isBookReleased(book)) {
+                    enrichedCharacters.push({
+                        ...char,
+                        _firstBookPath: path,
+                        _firstBook: book,
+                        _listRole: appearance.role || 'Secondary',
+                    });
+                    break; // only list under first released appearance
+                }
+            }
+        }
+
+        // ── Step 6: Extract saga/collection metadata from the book path ──────
+        // Path: /chronicles/talesOfAirdaeya/collections/adventuresOnOram/sagas/drakkaenNakkla/books/catchingQat
+        // segments[3] = collectionId, segments[5] = sagaId
+        function parsePath(path) {
+            const parts = path.replace(/^\//, '').split('/');
+            // parts: chronicles, talesOfAirdaeya, collections, <collId>, sagas, <sagaId>, books, <bookId>
+            return {
+                collectionId: parts[3] || '',
+                sagaId:       parts[5] || '',
+                bookId:       parts[7] || '',
+            };
+        }
+
+        // Human-readable saga names: derive from sagaId or add a field to your book docs later
+        // For now we title-case the sagaId (e.g. "drakkaenNakkla" → "Drakkaen Nakkla")
+        function toTitleCase(camelOrKebab) {
+            return camelOrKebab
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/[-_]/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase())
+                .trim();
+        }
+
+        // ── Step 7: Build saga → book → character structure ──────────────────
+        // Sort key for books: bookOrder1 field (your naming convention)
+        function bookSortOrder(book) {
+            // Support bookOrder1, bookOrder, or fallback to 0
+            return book.bookOrder1 ?? book.bookOrder ?? 0;
+        }
+
+        // sagaMap: sagaId → { sagaId, sagaLabel, collectionId, books: Map<bookPath, {book, chars[]}> }
+        const sagaMap = {};
+        for (const char of enrichedCharacters) {
+            const { collectionId, sagaId, bookId } = parsePath(char._firstBookPath);
+            if (!sagaMap[sagaId]) {
+                sagaMap[sagaId] = {
+                    sagaId,
+                    sagaLabel: toTitleCase(sagaId),
+                    collectionId,
+                    bookEntries: {},
+                };
+            }
+            const saga = sagaMap[sagaId];
+            if (!saga.bookEntries[char._firstBookPath]) {
+                saga.bookEntries[char._firstBookPath] = { book: char._firstBook, chars: [] };
+            }
+            saga.bookEntries[char._firstBookPath].chars.push(char);
+        }
+
+        // Also add future books (have a releaseDate but not yet released) so they show as stubs
+        for (const [path, book] of Object.entries(bookMap)) {
+            if (isBookReleased(book) || !bookHasReleaseDate(book)) continue;
+            const { collectionId, sagaId } = parsePath(path);
+            if (!sagaMap[sagaId]) {
+                sagaMap[sagaId] = {
+                    sagaId,
+                    sagaLabel: toTitleCase(sagaId),
+                    collectionId,
+                    bookEntries: {},
+                };
+            }
+            if (!sagaMap[sagaId].bookEntries[path]) {
+                sagaMap[sagaId].bookEntries[path] = { book, chars: [], isFuture: true };
+            }
+        }
+
+        // Sort sagas (alphabetical for now; add a sagaOrder field to book docs later to control this)
+        const sortedSagas = Object.values(sagaMap).sort((a, b) =>
+            a.sagaLabel.localeCompare(b.sagaLabel)
+        );
+
+        // Sort books within each saga by bookOrder1
+        for (const saga of sortedSagas) {
+            saga.sortedBooks = Object.values(saga.bookEntries)
+                .sort((a, b) => bookSortOrder(a.book) - bookSortOrder(b.book));
+        }
+
+        // ── Step 8: Render ───────────────────────────────────────────────────
+        characterDisplayArea.innerHTML = `
+            <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+            <h1>All Characters</h1>
+            <div class="character-list-structured"></div>
+        `;
+        document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+
+        const structuredList = characterDisplayArea.querySelector('.character-list-structured');
+
+        for (const saga of sortedSagas) {
+            const sagaSection = document.createElement('div');
+            sagaSection.classList.add('saga-section');
+
+            const sagaHeader = document.createElement('h2');
+            sagaHeader.classList.add('saga-header');
+            sagaHeader.textContent = saga.sagaLabel;
+            sagaSection.appendChild(sagaHeader);
+
+            for (const { book, chars, isFuture } of saga.sortedBooks) {
+                const bookSection = document.createElement('div');
+                bookSection.classList.add('book-section');
+
+                const bookHeader = document.createElement('h3');
+                bookHeader.classList.add('book-header');
+
+                if (isFuture) {
+                    const rd = parseReleaseDate(book);
+                    const label = rd ? getReleaseSeason(rd) : 'Coming Soon';
+                    bookHeader.innerHTML = `${book.title || 'Untitled'} <span class="coming-soon-label">${label}</span>`;
                 } else {
-                    characterImageElement.src = 'https://via.placeholder.com/100x100?text=No+Image';
-                    characterImageElement.alt = 'No image available';
-                    characterImageElement.classList.add('character-list-portrait');
+                    bookHeader.textContent = book.title || 'Untitled';
+                }
+                bookSection.appendChild(bookHeader);
+
+                if (!isFuture && chars.length > 0) {
+                    const roles = ['POV', 'Primary', 'Secondary'];
+                    for (const role of roles) {
+                        const roleChars = chars
+                            .filter(c => c._listRole === role)
+                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                        if (roleChars.length === 0) continue;
+
+                        const roleSection = document.createElement('div');
+                        roleSection.classList.add('role-section');
+
+                        const roleLabel = document.createElement('h4');
+                        roleLabel.classList.add('role-label');
+                        roleLabel.textContent = role === 'POV' ? 'POV Characters' : `${role} Characters`;
+                        roleSection.appendChild(roleLabel);
+
+                        const roleGrid = document.createElement('div');
+                        roleGrid.classList.add('character-list-grid');
+                        roleChars.forEach(char => appendCharacterCard(roleGrid, char));
+                        roleSection.appendChild(roleGrid);
+                        bookSection.appendChild(roleSection);
+                    }
+
+                    // Catch-all for any unrecognised roles
+                    const otherChars = chars
+                        .filter(c => !roles.includes(c._listRole))
+                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                    if (otherChars.length > 0) {
+                        const roleGrid = document.createElement('div');
+                        roleGrid.classList.add('character-list-grid');
+                        otherChars.forEach(char => appendCharacterCard(roleGrid, char));
+                        bookSection.appendChild(roleGrid);
+                    }
                 }
 
-                characterListItem.appendChild(characterImageElement);
+                sagaSection.appendChild(bookSection);
+            }
 
-                const characterTextContent = document.createElement('div');
-                characterTextContent.classList.add('character-list-text');
-                characterTextContent.appendChild(characterNameElement);
-                characterTextContent.appendChild(characterDescriptionElement);
-                characterListItem.appendChild(characterTextContent);
-
-                characterListGrid.appendChild(characterListItem);
-            });
-            console.log("All character data and images fetched and displayed in a list!");
-
-        } else {
-            characterDisplayArea.innerHTML = `
-                <button class="back-button" id="back-to-home-btn">← Back to Home</button>
-                <h2>No characters found in Firestore!</h2>
-            `;
-            document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+            structuredList.appendChild(sagaSection);
         }
+
+        console.log("Character list rendered with collection/saga/book/role structure.");
+
     } catch (error) {
         console.error("Error fetching characters:", error);
         characterDisplayArea.innerHTML = `
@@ -208,6 +385,55 @@ async function displayCharacterList() {
         `;
         document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
     }
+}
+
+// Returns a human-readable season string like "Coming Fall 2027" from a future Date
+function getReleaseSeason(date) {
+    const month = date.getMonth() + 1; // 1-12
+    const year = date.getFullYear();
+    let season;
+    if (month >= 3 && month <= 5)       season = 'Spring';
+    else if (month >= 6 && month <= 8)  season = 'Summer';
+    else if (month >= 9 && month <= 11) season = 'Fall';
+    else                                 season = 'Winter';
+    return `Coming ${season} ${year}`;
+}
+
+// Renders a single character card into a grid container
+function appendCharacterCard(container, characterData) {
+    const characterId = characterData.id;
+    const characterListItem = document.createElement('div');
+    characterListItem.classList.add('character-list-item');
+    characterListItem.dataset.characterId = characterId;
+    characterListItem.addEventListener('click', () => displayCharacterDetails(characterId));
+
+    const characterImageElement = document.createElement('img');
+    if (characterData.portraitURL || characterData.drakkaenPortraitURL) {
+        characterImageElement.src = characterData.portraitURL || characterData.drakkaenPortraitURL;
+        characterImageElement.alt = `Portrait of ${characterData.name}`;
+    } else {
+        characterImageElement.src = 'https://via.placeholder.com/100x100?text=No+Image';
+        characterImageElement.alt = 'No image available';
+    }
+    characterImageElement.classList.add('character-list-portrait');
+    characterListItem.appendChild(characterImageElement);
+
+    const characterTextContent = document.createElement('div');
+    characterTextContent.classList.add('character-list-text');
+
+    const characterNameElement = document.createElement('h3');
+    characterNameElement.textContent = characterData.name;
+
+    const characterDescriptionElement = document.createElement('p');
+    const shortDescription = characterData.description
+        ? characterData.description.substring(0, 150) + '...'
+        : 'No description available.';
+    characterDescriptionElement.textContent = shortDescription;
+
+    characterTextContent.appendChild(characterNameElement);
+    characterTextContent.appendChild(characterDescriptionElement);
+    characterListItem.appendChild(characterTextContent);
+    container.appendChild(characterListItem);
 }
 
 
@@ -362,6 +588,7 @@ function renderQuestion() {
         textarea.placeholder = "Type your answer here...";
         textarea.id = `question-${questionData.id}`;
         textarea.name = `answer-${questionData.id}`;
+        textarea.maxLength = 100;
 
         if (userAnswers[questionData.id]) {
             textarea.value = userAnswers[questionData.id];
@@ -369,7 +596,20 @@ function renderQuestion() {
         textarea.addEventListener('input', () => {
             userAnswers[questionData.id] = textarea.value;
         });
+
+        // Enter key triggers Next/Submit instead of inserting a newline
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const nextBtn = document.getElementById('next-question-btn');
+                if (nextBtn) nextBtn.click();
+            }
+        });
+
         quizAnswersDiv.appendChild(textarea);
+
+        // Autofocus so the user can start typing immediately
+        setTimeout(() => textarea.focus(), 0);
     }
 
     prevButton.disabled = currentQuestionIndex === 0;
@@ -746,11 +986,11 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         ctx.fillText('Airdaeium', W/2, 100);
 
         ctx.fillStyle = 'rgba(255,215,0,0.6)';
-        ctx.font = 'italic 30px Georgia, serif';
-        ctx.fillText('Your Airdaeya Personality Match', W/2, 140);
+        ctx.font = 'italic 36px Georgia, serif';
+        ctx.fillText('My Airdaeya Personality Match', W/2, 146);
 
         // Portrait circle — bigger
-        const centerX = W/2, portraitY = 400, radius = 210;
+        const centerX = W/2, portraitY = 403, radius = 210;
 
         // Glow effect
         const glow = ctx.createRadialGradient(centerX, portraitY, radius * 0.7, centerX, portraitY, radius * 1.5);
@@ -804,13 +1044,13 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             nameFontSize -= 2;
             ctx.font = `bold ${nameFontSize}px Georgia, serif`;
         }
-        ctx.fillText(displayName, W/2, 692);
+        ctx.fillText(displayName, W/2, 718);
         ctx.shadowBlur = 0;
 
         // Proclamation — word wrap, bigger font
         if (proclamation) {
             ctx.fillStyle = 'rgba(195,177,133,0.92)';
-            ctx.font = 'italic 34px Georgia, serif';
+            ctx.font = 'italic 42px Georgia, serif';
             const maxWidth = W - 100;
             const words = proclamation.split(' ');
             const procLines = [];
@@ -823,8 +1063,8 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
                 } else { currentLine = test; }
             }
             if (currentLine) procLines.push(currentLine);
-            const lineHeight = 44;
-            let procY = 746;
+            const lineHeight = 54;
+            let procY = 782;
             for (const pl of procLines) {
                 ctx.fillText(pl, W/2, procY);
                 procY += lineHeight;
@@ -835,7 +1075,7 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         ctx.strokeStyle = 'rgba(255,215,0,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(W*0.15, 894); ctx.lineTo(W*0.85, 894);
+        ctx.moveTo(W*0.15, 918); ctx.lineTo(W*0.85, 918);
         ctx.stroke();
 
         // KT Pike logo
@@ -843,9 +1083,9 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             const logo = new Image();
             logo.crossOrigin = 'Anonymous';
             await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775'; });
-            const logoH = 65;
+            const logoH = 85;
             const logoW = logo.width * (logoH / logo.height);
-            ctx.drawImage(logo, (W - logoW) / 2, 906, logoW, logoH);
+            ctx.drawImage(logo, (W - logoW) / 2, 928, logoW, logoH);
         } catch(e) {
             ctx.fillStyle = 'rgba(255,215,0,0.7)';
             ctx.font = '28px Georgia, serif';
@@ -854,8 +1094,8 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
 
         // Website
         ctx.fillStyle = 'rgba(195,177,133,0.65)';
-        ctx.font = '24px Arial, sans-serif';
-        ctx.fillText('Find your match at airdaeya.web.app', W/2, 974);
+        ctx.font = '30px Arial, sans-serif';
+        ctx.fillText('Find your match at airdaeya.web.app', W/2, 1032);
 
         // Download
         const link = document.createElement('a');
@@ -884,6 +1124,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const isCurrentlyDarkMode = document.body.classList.contains('dark-mode');
             applyTheme(!isCurrentlyDarkMode);
         });
+    }
+
+    // Make the Airdaeium logo clickable — return to home from anywhere
+    const logoEl = document.getElementById('airdaeium-logo');
+    if (logoEl) {
+        logoEl.style.cursor = 'pointer';
+        logoEl.addEventListener('click', displayHomeScreen);
     }
 
     displayHomeScreen();
