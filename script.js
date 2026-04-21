@@ -138,49 +138,79 @@ async function displayCharacterList() {
     characterDisplayArea.innerHTML = `<h2>Loading characters...</h2>`;
 
     try {
-        // ── Step 1: Fetch all characters (top-level collection) ──────────────
-        const charactersSnapshot = await db.collection('characters').get();
+        // ── Step 1: Fetch everything in parallel ─────────────────────────────
+        // Full path: chronicles/{c}/collections/{col}/sagas/{s}/books/{b}
+        // We fetch collection group queries for books and sagas,
+        // plus the known collections subcollection for collection-level metadata.
+        const [charactersSnapshot, booksGroupSnapshot, sagasGroupSnapshot, collectionsSnapshot] = await Promise.all([
+            db.collection('characters').get(),
+            db.collectionGroup('books').get(),
+            db.collectionGroup('sagas').get(),
+            db.collection('chronicles').get().then(async chroniclesSnap => {
+                // Fetch each chronicle's collections subcollection
+                const allCollDocs = [];
+                await Promise.all(chroniclesSnap.docs.map(async chronicleDoc => {
+                    const collSnap = await chronicleDoc.ref.collection('collections').get();
+                    collSnap.forEach(doc => allCollDocs.push({ _path: doc.ref.path, id: doc.id, ...doc.data() }));
+                }));
+                return allCollDocs;
+            })
+        ]);
+
         const allCharacters = [];
-        charactersSnapshot.forEach(doc => {
-            allCharacters.push({ id: doc.id, ...doc.data() });
+        charactersSnapshot.forEach(doc => allCharacters.push({ id: doc.id, ...doc.data() }));
+
+        // ── Step 2: Build lookup maps ─────────────────────────────────────────
+
+        // bookMap: Firestore path → book data
+        const bookMap = {};
+        booksGroupSnapshot.forEach(doc => {
+            bookMap[doc.ref.path] = { _path: doc.ref.path, ...doc.data() };
         });
 
-        // ── Step 2: Collect all unique book references across all characters ──
-        // Each character has a bookAppearances array of { bookID (reference), role (string) }
-        const bookRefPaths = new Set();
-        for (const char of allCharacters) {
-            if (!Array.isArray(char.bookAppearances)) continue;
-            for (const appearance of char.bookAppearances) {
-                if (appearance.bookID && appearance.bookID.path) {
-                    bookRefPaths.add(appearance.bookID.path);
-                }
-            }
+        // sagaMetaMap: sagaDocId → saga doc data (sagaName, sagaURL, sagaOrder, _path)
+        // Key by full path to handle duplicate saga IDs across different collections
+        const sagaMetaMap = {}; // key: sagaDocId, value: saga meta (last write wins — IDs should be unique)
+        const sagaMetaByPath = {}; // key: full path
+        sagasGroupSnapshot.forEach(doc => {
+            const meta = { _path: doc.ref.path, id: doc.id, ...doc.data() };
+            sagaMetaMap[doc.id] = meta;
+            sagaMetaByPath[doc.ref.path] = meta;
+        });
+
+        // collectionMetaMap: collectionDocId → collection doc data
+        const collectionMetaMap = {};
+        collectionsSnapshot.forEach(col => {
+            collectionMetaMap[col.id] = col;
+        });
+
+        // ── Step 3: Path parser & helpers ────────────────────────────────────
+        // chronicles/talesOfAirdaeya/collections/adventuresOnOram/sagas/drakkaenNakkla/books/catchingQat
+        // index:  0        1               2           3               4       5           6       7
+        function parsePath(path) {
+            const parts = path.replace(/^\//, '').split('/');
+            return {
+                chronicleId:  parts[1] || '',
+                collectionId: parts[3] || '',
+                sagaId:       parts[5] || '',
+                bookId:       parts[7] || '',
+            };
         }
 
-        // ── Step 3: Fetch all referenced book documents ──────────────────────
-        // bookMap: full Firestore path → book data
-        const bookMap = {};
-        await Promise.all([...bookRefPaths].map(async (path) => {
-            try {
-                const bookDoc = await db.doc(path).get();
-                if (bookDoc.exists) {
-                    bookMap[path] = { _path: path, ...bookDoc.data() };
-                }
-            } catch (e) {
-                console.warn(`Could not fetch book at ${path}:`, e);
-            }
-        }));
+        function toTitleCase(str) {
+            return str
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/[-_]/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase())
+                .trim();
+        }
 
-        // ── Step 4: Helpers ──────────────────────────────────────────────────
-
-        // Parse the book's releaseDate string e.g. "October 28, 2025"
         function parseReleaseDate(book) {
             if (!book || !book.releaseDate) return null;
             const d = new Date(book.releaseDate);
             return isNaN(d.getTime()) ? null : d;
         }
 
-        // A book is "released" if its `released` boolean is true OR its releaseDate is in the past
         const now = new Date();
         function isBookReleased(book) {
             if (!book) return false;
@@ -189,117 +219,105 @@ async function displayCharacterList() {
             return rd !== null && rd <= now;
         }
 
-        // A book has a release date set at all (past or future) — needed to show future books
-        function bookHasReleaseDate(book) {
-            return book && !!book.releaseDate;
-        }
-
-        // ── Step 5: For each character, find their first RELEASED book appearance
-        // This is the book they'll be listed under on the character list.
-        // We also grab the role from that same appearance entry.
-        // Characters with no released book appearance are hidden entirely.
-
-        const ROLE_ORDER = { 'POV': 0, 'Primary': 1, 'Secondary': 2 };
-
-        // Enrich each character with { _firstBookPath, _firstBook, _listRole }
-        const enrichedCharacters = [];
-        for (const char of allCharacters) {
-            if (!Array.isArray(char.bookAppearances) || char.bookAppearances.length === 0) continue;
-            // Walk appearances in order — first released book wins
-            for (const appearance of char.bookAppearances) {
-                const path = appearance.bookID && appearance.bookID.path;
-                if (!path) continue;
-                const book = bookMap[path];
-                if (isBookReleased(book)) {
-                    enrichedCharacters.push({
-                        ...char,
-                        _firstBookPath: path,
-                        _firstBook: book,
-                        _listRole: appearance.role || 'Secondary',
-                    });
-                    break; // only list under first released appearance
-                }
-            }
-        }
-
-        // ── Step 6: Extract saga/collection metadata from the book path ──────
-        // Path: /chronicles/talesOfAirdaeya/collections/adventuresOnOram/sagas/drakkaenNakkla/books/catchingQat
-        // segments[3] = collectionId, segments[5] = sagaId
-        function parsePath(path) {
-            const parts = path.replace(/^\//, '').split('/');
-            // parts: chronicles, talesOfAirdaeya, collections, <collId>, sagas, <sagaId>, books, <bookId>
-            return {
-                collectionId: parts[3] || '',
-                sagaId:       parts[5] || '',
-                bookId:       parts[7] || '',
-            };
-        }
-
-        // Human-readable saga names: derive from sagaId or add a field to your book docs later
-        // For now we title-case the sagaId (e.g. "drakkaenNakkla" → "Drakkaen Nakkla")
-        function toTitleCase(camelOrKebab) {
-            return camelOrKebab
-                .replace(/([A-Z])/g, ' $1')
-                .replace(/[-_]/g, ' ')
-                .replace(/\b\w/g, c => c.toUpperCase())
-                .trim();
-        }
-
-        // ── Step 7: Build saga → book → character structure ──────────────────
-        // Sort key for books: bookOrder1 field (your naming convention)
         function bookSortOrder(book) {
-            // Support bookOrder1, bookOrder, or fallback to 0
             return book.bookOrder1 ?? book.bookOrder ?? 0;
         }
 
-        // sagaMap: sagaId → { sagaId, sagaLabel, collectionId, books: Map<bookPath, {book, chars[]}> }
-        const sagaMap = {};
-        for (const char of enrichedCharacters) {
-            const { collectionId, sagaId, bookId } = parsePath(char._firstBookPath);
-            if (!sagaMap[sagaId]) {
-                sagaMap[sagaId] = {
-                    sagaId,
-                    sagaLabel: toTitleCase(sagaId),
+        // ── Step 4: Build collectionMap → sagaMap → bookEntries ──────────────
+        // collectionMap: collectionId → { meta, sagas: { sagaId → { meta, bookEntries } } }
+        const collectionMap = {};
+
+        function ensureCollection(collectionId) {
+            if (!collectionMap[collectionId]) {
+                const meta = collectionMetaMap[collectionId] || {};
+                collectionMap[collectionId] = {
                     collectionId,
+                    collectionLabel: meta.collectionName || toTitleCase(collectionId),
+                    collectionURL:   meta.collectionURL  || null,
+                    collectionOrder: meta.collectionOrder ?? 999,
+                    sagas: {},
+                };
+            }
+            return collectionMap[collectionId];
+        }
+
+        function ensureSaga(collectionId, sagaId) {
+            const collection = ensureCollection(collectionId);
+            if (!collection.sagas[sagaId]) {
+                const meta = sagaMetaMap[sagaId] || {};
+                collection.sagas[sagaId] = {
+                    sagaId,
+                    sagaLabel: meta.sagaName || toTitleCase(sagaId),
+                    sagaURL:   meta.sagaURL  || null,
+                    sagaOrder: meta.sagaOrder ?? 999,
                     bookEntries: {},
                 };
             }
-            const saga = sagaMap[sagaId];
-            if (!saga.bookEntries[char._firstBookPath]) {
-                saga.bookEntries[char._firstBookPath] = { book: char._firstBook, chars: [] };
-            }
-            saga.bookEntries[char._firstBookPath].chars.push(char);
+            return collection.sagas[sagaId];
         }
 
-        // Also add future books (have a releaseDate but not yet released) so they show as stubs
+        // Seed from saga documents — catches sagas with no books yet (e.g. The Valore)
+        for (const [sagaId, sagaMeta] of Object.entries(sagaMetaMap)) {
+            const { collectionId } = parsePath(sagaMeta._path);
+            if (!collectionId) continue;
+            ensureSaga(collectionId, sagaId);
+        }
+
+        // Seed from all book documents
         for (const [path, book] of Object.entries(bookMap)) {
-            if (isBookReleased(book) || !bookHasReleaseDate(book)) continue;
             const { collectionId, sagaId } = parsePath(path);
-            if (!sagaMap[sagaId]) {
-                sagaMap[sagaId] = {
-                    sagaId,
-                    sagaLabel: toTitleCase(sagaId),
-                    collectionId,
-                    bookEntries: {},
+            if (!collectionId || !sagaId) continue;
+            const saga = ensureSaga(collectionId, sagaId);
+
+            const isReleased = isBookReleased(book);
+            const hasFutureDate = !isReleased && !!(book.releaseDate);
+
+            if (!saga.bookEntries[path]) {
+                saga.bookEntries[path] = {
+                    book,
+                    chars: [],
+                    isFuture:   hasFutureDate,
+                    isAnnounced: !isReleased && !hasFutureDate,
                 };
             }
-            if (!sagaMap[sagaId].bookEntries[path]) {
-                sagaMap[sagaId].bookEntries[path] = { book, chars: [], isFuture: true };
+        }
+
+        // ── Step 5: Assign characters to their first released book ───────────
+        for (const char of allCharacters) {
+            if (!Array.isArray(char.bookAppearances) || char.bookAppearances.length === 0) continue;
+            for (const appearance of char.bookAppearances) {
+                const path = appearance.bookID && appearance.bookID.path;
+                if (!path) continue;
+                if (!appearance.role || appearance.role.toLowerCase() === 'cloaked') continue;
+                const book = bookMap[path];
+                if (!isBookReleased(book)) continue;
+                const { collectionId, sagaId } = parsePath(path);
+                const saga = collectionMap[collectionId]?.sagas[sagaId];
+                if (saga && saga.bookEntries[path]) {
+                    saga.bookEntries[path].chars.push({ ...char, _listRole: appearance.role });
+                }
+                break;
             }
         }
 
-        // Sort sagas (alphabetical for now; add a sagaOrder field to book docs later to control this)
-        const sortedSagas = Object.values(sagaMap).sort((a, b) =>
-            a.sagaLabel.localeCompare(b.sagaLabel)
-        );
+        // ── Step 6: Sort everything ───────────────────────────────────────────
+        const sortedCollections = Object.values(collectionMap).sort((a, b) => {
+            if (a.collectionOrder !== b.collectionOrder) return a.collectionOrder - b.collectionOrder;
+            return a.collectionLabel.localeCompare(b.collectionLabel);
+        });
 
-        // Sort books within each saga by bookOrder1
-        for (const saga of sortedSagas) {
-            saga.sortedBooks = Object.values(saga.bookEntries)
-                .sort((a, b) => bookSortOrder(a.book) - bookSortOrder(b.book));
+        for (const collection of sortedCollections) {
+            collection.sortedSagas = Object.values(collection.sagas).sort((a, b) => {
+                if (a.sagaOrder !== b.sagaOrder) return a.sagaOrder - b.sagaOrder;
+                return a.sagaLabel.localeCompare(b.sagaLabel);
+            });
+            for (const saga of collection.sortedSagas) {
+                saga.sortedBooks = Object.values(saga.bookEntries)
+                    .sort((a, b) => bookSortOrder(a.book) - bookSortOrder(b.book));
+            }
         }
 
-        // ── Step 8: Render ───────────────────────────────────────────────────
+        // ── Step 7: Render ────────────────────────────────────────────────────
         characterDisplayArea.innerHTML = `
             <button class="back-button" id="back-to-home-btn">← Back to Home</button>
             <h1>All Characters</h1>
@@ -309,70 +327,108 @@ async function displayCharacterList() {
 
         const structuredList = characterDisplayArea.querySelector('.character-list-structured');
 
-        for (const saga of sortedSagas) {
-            const sagaSection = document.createElement('div');
-            sagaSection.classList.add('saga-section');
+        for (const collection of sortedCollections) {
+            const collectionSection = document.createElement('div');
+            collectionSection.classList.add('collection-section');
 
-            const sagaHeader = document.createElement('h2');
-            sagaHeader.classList.add('saga-header');
-            sagaHeader.textContent = saga.sagaLabel;
-            sagaSection.appendChild(sagaHeader);
+            // Collection header
+            const collectionHeader = document.createElement('h2');
+            collectionHeader.classList.add('collection-header');
+            if (collection.collectionURL) {
+                collectionHeader.innerHTML = `<a href="${collection.collectionURL}" target="_blank" rel="noopener">${collection.collectionLabel}</a>`;
+            } else {
+                collectionHeader.textContent = collection.collectionLabel;
+            }
+            collectionSection.appendChild(collectionHeader);
 
-            for (const { book, chars, isFuture } of saga.sortedBooks) {
-                const bookSection = document.createElement('div');
-                bookSection.classList.add('book-section');
+            for (const saga of collection.sortedSagas) {
+                const sagaSection = document.createElement('div');
+                sagaSection.classList.add('saga-section');
 
-                const bookHeader = document.createElement('h3');
-                bookHeader.classList.add('book-header');
-
-                if (isFuture) {
-                    const rd = parseReleaseDate(book);
-                    const label = rd ? getReleaseSeason(rd) : 'Coming Soon';
-                    bookHeader.innerHTML = `${book.title || 'Untitled'} <span class="coming-soon-label">${label}</span>`;
+                // Saga header
+                const sagaHeader = document.createElement('h3');
+                sagaHeader.classList.add('saga-header');
+                if (saga.sagaURL) {
+                    sagaHeader.innerHTML = `<a href="${saga.sagaURL}" target="_blank" rel="noopener">${saga.sagaLabel}</a>`;
                 } else {
-                    bookHeader.textContent = book.title || 'Untitled';
+                    sagaHeader.textContent = saga.sagaLabel;
                 }
-                bookSection.appendChild(bookHeader);
+                sagaSection.appendChild(sagaHeader);
 
-                if (!isFuture && chars.length > 0) {
-                    const roles = ['POV', 'Primary', 'Secondary'];
-                    for (const role of roles) {
-                        const roleChars = chars
-                            .filter(c => c._listRole === role)
+                saga.sortedBooks.forEach(({ book, chars, isFuture, isAnnounced }, bookIndex) => {
+                    const bookSection = document.createElement('div');
+                    bookSection.classList.add('book-section');
+
+                    // Book header
+                    const bookHeader = document.createElement('h4');
+                    bookHeader.classList.add('book-header');
+                    const bookTitle = book.title || 'Untitled';
+
+                    if (isFuture) {
+                        const rd = parseReleaseDate(book);
+                        const label = rd ? getReleaseSeason(rd) : 'Coming Soon';
+                        bookHeader.innerHTML = `${bookTitle} <span class="coming-soon-label">${label}</span>`;
+                    } else if (isAnnounced) {
+                        bookHeader.innerHTML = `${bookTitle} <span class="coming-soon-label">Coming Soon</span>`;
+                    } else if (book.bookURL) {
+                        bookHeader.innerHTML = `<a href="${book.bookURL}" target="_blank" rel="noopener">${bookTitle}</a>`;
+                    } else {
+                        bookHeader.textContent = bookTitle;
+                    }
+                    bookSection.appendChild(bookHeader);
+
+                    // "New Characters!" banner for book 2+
+                    if (bookIndex > 0) {
+                        const newBanner = document.createElement('p');
+                        newBanner.classList.add('new-characters-banner');
+                        newBanner.textContent = '✨ New Characters!';
+                        bookSection.appendChild(newBanner);
+                    }
+
+                    if (!isFuture && !isAnnounced && chars.length > 0) {
+                        const mainChars = chars
+                            .filter(c => c._listRole === 'POV' || c._listRole === 'Primary')
                             .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-                        if (roleChars.length === 0) continue;
+                        const additionalChars = chars
+                            .filter(c => c._listRole === 'Secondary')
+                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                        const knownRoles = ['POV', 'Primary', 'Secondary'];
+                        const otherChars = chars
+                            .filter(c => !knownRoles.includes(c._listRole))
+                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-                        const roleSection = document.createElement('div');
-                        roleSection.classList.add('role-section');
+                        function appendRoleSection(label, charList) {
+                            if (charList.length === 0) return;
+                            const section = document.createElement('div');
+                            section.classList.add('role-section');
+                            const roleLabel = document.createElement('p');
+                            roleLabel.classList.add('role-label');
+                            roleLabel.textContent = label;
+                            section.appendChild(roleLabel);
+                            const grid = document.createElement('div');
+                            grid.classList.add('character-list-grid');
+                            charList.forEach(char => appendCharacterCard(grid, char));
+                            section.appendChild(grid);
+                            bookSection.appendChild(section);
+                        }
 
-                        const roleLabel = document.createElement('h4');
-                        roleLabel.classList.add('role-label');
-                        roleLabel.textContent = role === 'POV' ? 'POV Characters' : `${role} Characters`;
-                        roleSection.appendChild(roleLabel);
-
-                        const roleGrid = document.createElement('div');
-                        roleGrid.classList.add('character-list-grid');
-                        roleChars.forEach(char => appendCharacterCard(roleGrid, char));
-                        roleSection.appendChild(roleGrid);
-                        bookSection.appendChild(roleSection);
+                        appendRoleSection('Main Characters', mainChars);
+                        appendRoleSection('Additional Characters', additionalChars);
+                        if (otherChars.length > 0) {
+                            const grid = document.createElement('div');
+                            grid.classList.add('character-list-grid');
+                            otherChars.forEach(char => appendCharacterCard(grid, char));
+                            bookSection.appendChild(grid);
+                        }
                     }
 
-                    // Catch-all for any unrecognised roles
-                    const otherChars = chars
-                        .filter(c => !roles.includes(c._listRole))
-                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-                    if (otherChars.length > 0) {
-                        const roleGrid = document.createElement('div');
-                        roleGrid.classList.add('character-list-grid');
-                        otherChars.forEach(char => appendCharacterCard(roleGrid, char));
-                        bookSection.appendChild(roleGrid);
-                    }
-                }
+                    sagaSection.appendChild(bookSection);
+                });
 
-                sagaSection.appendChild(bookSection);
+                collectionSection.appendChild(sagaSection);
             }
 
-            structuredList.appendChild(sagaSection);
+            structuredList.appendChild(collectionSection);
         }
 
         console.log("Character list rendered with collection/saga/book/role structure.");
