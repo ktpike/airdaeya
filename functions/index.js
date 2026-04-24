@@ -1,36 +1,30 @@
 /**
  * Firebase Cloud Function to process quiz answers and find a character match using Google Gemini.
+ * Updated for flat Firestore schema (books, characters, appearances are all top-level collections).
  */
 
 // --- ES Module Imports ---
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import * as functions from "firebase-functions"; // Import as namespace for functions.defineSecret
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-
-// --- CORRECTED: Import defineSecret from firebase-functions/params ---
 import { defineSecret } from "firebase-functions/params";
-
-// --- Gemini SDK ---
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
 
 // --- Global Scope Initialization ---
 console.log("GLOBAL SCOPE: Function container starting up.");
 
 try {
-    initializeApp(); // Initialize Firebase Admin SDK
+    initializeApp();
     console.log("GLOBAL SCOPE: Firebase Admin SDK initialized successfully.");
 } catch (e) {
     console.error("GLOBAL SCOPE ERROR: Failed to initialize Firebase Admin SDK:", e);
-    throw e; // Re-throw to make sure the health check fails visibly if this is the issue
+    throw e;
 }
 
-// Get Firestore instance globally for efficiency
 const db = getFirestore();
 
 // =============================================================================
-// Numerology Pre-Filter: Maps quiz answers to numerology numbers
+// Numerology Pre-Filter
 // Expression (e) = 3pts, Heart's Desire (h) = 2pts, Personality (p) = 1pt
 // =============================================================================
 const ANSWER_NUMEROLOGY = {
@@ -57,10 +51,10 @@ const ANSWER_NUMEROLOGY = {
     "The gift of seeing the future.": [7, 9],
     "The power to understand the hidden language of living things.": [2, 7],
     // Q5 Past
-    "It\'s a source of valuable lessons.": [8, 9],
-    "It\'s something to be avenged.": [8, 1],
-    "It\'s a mystery waiting to be uncovered.": [7, 3],
-    "It\'s something I\'d prefer not to dwell on.": [5, 1],
+    "It's a source of valuable lessons.": [8, 9],
+    "It's something to be avenged.": [8, 1],
+    "It's a mystery waiting to be uncovered.": [7, 3],
+    "It's something I'd prefer not to dwell on.": [5, 1],
     // Q6 Animal
     "Their single-minded focus and unwavering determination.": [1, 4],
     "Their ability to adapt and survive in any environment.": [5, 9],
@@ -68,7 +62,7 @@ const ANSWER_NUMEROLOGY = {
     "Their fierce loyalty and protectiveness toward their pack.": [6, 2],
     // Q7 Challenge
     "Being unable to speak or communicate effectively.": [3, 2],
-    "Having to follow rules and traditions you don\'t believe in.": [5, 1],
+    "Having to follow rules and traditions you don't believe in.": [5, 1],
     "Living a life where your talents are never fully used.": [1, 4],
     "Being forced to live a quiet life without adventure.": [5, 3],
     "Watching those under your protection suffer because of your failures.": [8, 6],
@@ -101,18 +95,18 @@ const ANSWER_NUMEROLOGY = {
 };
 
 // Characters guaranteed to always be included (wildcards)
-// Sarafeen's numbers are too common for numerology to reliably surface her
-const WILDCARD_CHARACTER_IDS = new Set(['sarafeen']);
+const WILDCARD_CHARACTER_IDS = new Set(["c_sarafeen"]);
 
 function scoreCharacterNumerology(charData, userAnswers) {
-    const e = Number(charData.expression) || 0;
-    const h = Number(charData.heartsDesire) || 0;
-    const p = Number(charData.personality) || 0;
+    // New field names: expression, hearts_desire, personality
+    const e = Number(charData.expression)   || 0;
+    const h = Number(charData.hearts_desire) || 0;
+    const p = Number(charData.personality)   || 0;
     let score = 0;
     for (const answer of Object.values(userAnswers)) {
         const nums = ANSWER_NUMEROLOGY[answer] || [];
         for (const num of nums) {
-            if (num === e) score += 3;
+            if (num === e)      score += 3;
             else if (num === h) score += 2;
             else if (num === p) score += 1;
         }
@@ -120,82 +114,66 @@ function scoreCharacterNumerology(charData, userAnswers) {
     return score;
 }
 
-// Define the secret at the top level, available to all functions that need it
-const GEMINI_API_KEY_SECRET = defineSecret("GEMINI_API_KEY"); // Matches the name in Secret Manager
+// =============================================================================
+// Secret
+// =============================================================================
+const GEMINI_API_KEY_SECRET = defineSecret("GEMINI_API_KEY");
 
-
-// --- Define the function using v2 syntax with ES Modules ---
+// =============================================================================
+// Cloud Function
+// =============================================================================
 export const processQuizAnswers = onCall(
     {
-        secrets: [GEMINI_API_KEY_SECRET], // Link the secret here
-        region: 'us-central1' // Explicitly define region for v2 functions
+        secrets: [GEMINI_API_KEY_SECRET],
+        region: "us-central1",
     },
     async (request) => {
-
         console.log("FUNCTION INVOKED: processQuizAnswers called.");
 
-        const data = request.data;
-
-        console.log("INVOCATION DEBUG: Callable function 'data' parameter:", data);
-
-        // Access secret value (only available inside the function execution)
         const geminiApiKey = GEMINI_API_KEY_SECRET.value();
-
         if (!geminiApiKey) {
-            console.error("INVOCATION ERROR: GEMINI_API_KEY is NOT available from Secret Manager as process.env.GEMINI_API_KEY!");
-            throw new HttpsError(
-                'internal',
-                'Gemini API Key is not configured for this function. Confirm it is set in Secret Manager and listed in `secrets` option.'
-            );
+            throw new HttpsError("internal", "Gemini API Key is not configured.");
         }
 
         const genAI = new GoogleGenerativeAI(geminiApiKey);
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-        // 1. Authentication (Optional but Recommended for real apps)
-        // if (!request.auth?.uid) { // request.auth.uid for v2
-        //     throw new HttpsError(
-        //         'unauthenticated',
-        //         'The function must be called while authenticated.'
-        //     );
-        // }
-
-        const userAnswers = data.answers;
+        const userAnswers = request.data.answers;
         if (!userAnswers || Object.keys(userAnswers).length === 0) {
-            throw new HttpsError('invalid-argument', 'No answers provided.');
+            throw new HttpsError("invalid-argument", "No answers provided.");
         }
 
-        let prompt = "A user has completed a personality quiz about the world of " +
-            "Airdaeya. Their answers are:\n\n";
-
+        // ── 1. Build question text map from personality_questions ────────────
         const questionTextMap = {};
         try {
             const questionsSnapshot = await db
-                .collection('personalityQuestions')
-                .orderBy('quesOrder')
+                .collection("personality_questions")
+                .orderBy("ques_order")
                 .get();
             questionsSnapshot.forEach(doc => {
                 questionTextMap[doc.id] = doc.data().question;
             });
         } catch (error) {
-            console.warn("Could not fetch question texts for prompt. Using IDs instead.", error);
+            console.warn("Could not fetch question texts.", error);
         }
 
-        if (userAnswers) {
-            for (const qId in userAnswers) {
-                if (Object.prototype.hasOwnProperty.call(userAnswers, qId)) {
-                    const questionText = questionTextMap[qId] || `Question ID ${qId}`;
-                    prompt += `${questionText}: ${userAnswers[qId]}\n`;
-                }
+        let prompt =
+            "A user has completed a personality quiz about the world of Airdaeya. Their answers are:\n\n";
+        for (const qId in userAnswers) {
+            if (Object.prototype.hasOwnProperty.call(userAnswers, qId)) {
+                const questionText = questionTextMap[qId] || `Question ID ${qId}`;
+                prompt += `${questionText}: ${userAnswers[qId]}\n`;
             }
-        } else {
-            prompt += "User provided no answers.\n"; // Should not happen with validation above
         }
 
-        // Find the food answer specifically for personalization
-        const foodAnswer = userAnswers['question13'] || userAnswers[Object.keys(userAnswers)[Object.keys(userAnswers).length - 1]] || 'something delicious';
+        // Last question is the food short-answer (q13)
+        const foodAnswer =
+            userAnswers["q13"] ||
+            userAnswers[Object.keys(userAnswers)[Object.keys(userAnswers).length - 1]] ||
+            "something delicious";
 
-        prompt += "\n\nBased on these answers, determine which single character from the Airdaeya universe " +
+        prompt +=
+            "\n\nBased on these answers, determine which single character from the Airdaeya universe " +
             "the user is most like. Pick only from the provided character list — do not invent new characters or lore.\n\n" +
             "Write your response in a fantastical, whimsical, and adventurous tone, as if you are an ancient " +
             "storyteller from the world of Airdaeya speaking directly to the user. The tone should be magical, " +
@@ -212,27 +190,30 @@ export const processQuizAnswers = onCall(
             "In 2 sentences maximum, describe something special and unique about how the user embodies this character's spirit — " +
             "what makes THEIR version of this character distinctly their own. This should feel personal and uplifting.\n\n" +
             "🍽️ A TASTE OF AIRDAEYA\n" +
-            "The user said their favorite food is: \"" + foodAnswer + "\". " +
+            `The user said their favorite food is: "${foodAnswer}". ` +
             "In exactly 2 playful sentences, imagine how this food exists or would be received in the world of Airdaeya — " +
             "perhaps how their matched character would react to it, what magical twist it might have on Oram, " +
             "or what it reveals about the user's adventurous spirit. Be creative, funny, and whimsical!\n\n" +
             "IMPORTANT: Keep your entire response under 300 words. Be concise but magical!\n\n";
 
-        // 2. Fetch books to determine which are released
+        // ── 2. Determine released and upcoming books (flat collection) ────────
         const releasedBookIds = new Set();
         const upcomingBooks = {};
+        const now = new Date();
+
         try {
-            const booksSnap = await db
-                .collection('chronicles').doc('talesOfAirdaeya')
-                .collection('collections').doc('adventuresOnOram')
-                .collection('sagas').doc('drakkaenNakkla')
-                .collection('books').get();
+            const booksSnap = await db.collection("books").get();
             booksSnap.forEach(doc => {
                 const b = doc.data();
                 if (b.released === true) {
                     releasedBookIds.add(doc.id);
-                } else if (b.releaseDate) {
-                    upcomingBooks[doc.id] = { title: b.title, releaseDate: b.releaseDate };
+                } else if (b.release_date) {
+                    const d = new Date(b.release_date);
+                    if (!isNaN(d.getTime())) {
+                        upcomingBooks[doc.id] = { title: b.book_title, releaseNote: b.release_note || "" };
+                    }
+                } else if (b.release_note) {
+                    upcomingBooks[doc.id] = { title: b.book_title, releaseNote: b.release_note };
                 }
             });
             console.log("Released books:", [...releasedBookIds]);
@@ -240,159 +221,181 @@ export const processQuizAnswers = onCall(
             console.warn("Could not fetch book release data:", error);
         }
 
-        function extractBookId(bookID) {
-            if (!bookID) return null;
-            if (typeof bookID === 'string') {
-                const parts = bookID.split('/');
-                return parts[parts.length - 1];
-            }
-            if (bookID._path && bookID._path.segments) {
-                return bookID._path.segments[bookID._path.segments.length - 1];
-            }
-            return null;
+        // ── 3. Build character → book lookup from flat appearances collection ─
+        // appearances has: { character_id, book_id, role }
+        const charToBooks = {}; // character_id → [{book_id, role}]
+        try {
+            const appSnap = await db.collection("appearances").get();
+            appSnap.forEach(doc => {
+                const { character_id, book_id, role } = doc.data();
+                if (!charToBooks[character_id]) charToBooks[character_id] = [];
+                charToBooks[character_id].push({ book_id, role });
+            });
+        } catch (error) {
+            console.warn("Could not fetch appearances:", error);
         }
 
-        // 3. Fetch and filter characters by book release status and role
+        // ── 4. Fetch and filter characters ────────────────────────────────────
         const eligibleCharacters = [];
         const upcomingCharacters = [];
+
         try {
-            const charactersSnapshot = await db.collection('characters').get();
+            const charactersSnapshot = await db.collection("characters").get();
             charactersSnapshot.forEach(doc => {
-                const charData = doc.data();
+                const charData = { id: doc.id, ...doc.data() };
                 if (!charData.name || !charData.description) return;
-                const appearances = charData.bookAppearances || [];
+
+                const appearances = charToBooks[doc.id] || [];
                 let isEligible = false;
                 let isUpcoming = false;
                 let upcomingBookInfo = null;
-                for (const appearance of appearances) {
-                    const bookId = extractBookId(appearance.bookID);
-                    const role = (appearance.role || '').toLowerCase();
-                    if (role === 'cloaked') continue;
-                    if (bookId && releasedBookIds.has(bookId)) {
+
+                for (const { book_id, role } of appearances) {
+                    if ((role || "").toLowerCase() === "cloaked") continue;
+                    if (releasedBookIds.has(book_id)) {
                         isEligible = true;
                         break;
-                    } else if (bookId && upcomingBooks[bookId]) {
+                    } else if (upcomingBooks[book_id]) {
                         isUpcoming = true;
-                        upcomingBookInfo = upcomingBooks[bookId];
+                        upcomingBookInfo = upcomingBooks[book_id];
                     }
                 }
+
                 if (isEligible) {
-                    eligibleCharacters.push({ id: doc.id, ...charData });
+                    eligibleCharacters.push(charData);
                 } else if (isUpcoming && upcomingBookInfo) {
-                    upcomingCharacters.push({ id: doc.id, ...charData, upcomingBookInfo });
+                    upcomingCharacters.push({ ...charData, upcomingBookInfo });
                 }
             });
 
             if (eligibleCharacters.length === 0) {
-                throw new HttpsError('failed-precondition', 'No eligible characters found.');
+                throw new HttpsError("failed-precondition", "No eligible characters found.");
             }
-            console.log(`Eligible characters (${eligibleCharacters.length}): ${eligibleCharacters.map(c => c.name).join(', ')}`);
+            console.log(
+                `Eligible characters (${eligibleCharacters.length}): ${eligibleCharacters.map(c => c.name).join(", ")}`
+            );
         } catch (error) {
             console.error("Error fetching characters:", error);
-            throw new HttpsError('internal', 'Could not retrieve character data.', error.message);
+            throw new HttpsError("internal", "Could not retrieve character data.", error.message);
         }
 
-        // 4. Numerology pre-filter: score and select top characters
+        // ── 5. Numerology pre-filter ──────────────────────────────────────────
         const TOP_N = 6;
         const scoredChars = eligibleCharacters.map(charData => ({
             charData,
             score: scoreCharacterNumerology(charData, userAnswers),
-            isWildcard: WILDCARD_CHARACTER_IDS.has(charData.id)
+            isWildcard: WILDCARD_CHARACTER_IDS.has(charData.id),
         }));
         scoredChars.sort((a, b) => b.score - a.score);
 
-        const wildcards = scoredChars.filter(c => c.isWildcard);
+        const wildcards    = scoredChars.filter(c => c.isWildcard);
         const nonWildcards = scoredChars.filter(c => !c.isWildcard);
-        const topN = nonWildcards.slice(0, TOP_N);
+        const topN         = nonWildcards.slice(0, TOP_N);
         const boundaryScore = topN.length > 0 ? topN[topN.length - 1].score : 0;
-        const tied = nonWildcards.slice(TOP_N).filter(c => c.score === boundaryScore);
+        const tied         = nonWildcards.slice(TOP_N).filter(c => c.score === boundaryScore);
 
         const seen = new Set();
         const finalChars = [...wildcards, ...topN, ...tied]
             .map(c => c.charData)
             .filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
 
-        console.log(`Pre-filter: ${eligibleCharacters.length} eligible -> ${finalChars.length} sent to Gemini: ${finalChars.map(c => c.name).join(', ')}`);
+        console.log(
+            `Pre-filter: ${eligibleCharacters.length} eligible -> ${finalChars.length} sent to Gemini: ${finalChars.map(c => c.name).join(", ")}`
+        );
 
-        // Build upcoming teaser if any
+        // ── 6. Upcoming teaser ────────────────────────────────────────────────
         if (upcomingCharacters.length > 0) {
-            prompt += "UPCOMING CHARACTERS (do NOT match the user to these, but if thematically similar " +
-                "to your chosen match, add a brief teaser at the very end mentioning the book and release date):\n";
+            prompt +=
+                "UPCOMING CHARACTERS (do NOT match the user to these, but if thematically similar " +
+                "to your chosen match, add a brief teaser at the very end mentioning the book and release note):\n";
             upcomingCharacters.forEach(char => {
-                prompt += `- ${char.name} (appearing in "${char.upcomingBookInfo.title}", ${char.upcomingBookInfo.releaseDate})\n`;
+                const note = char.upcomingBookInfo.releaseNote || "coming soon";
+                prompt += `- ${char.name} (appearing in "${char.upcomingBookInfo.title}", ${note})\n`;
             });
             prompt += "\n";
         }
 
-        // Build character prompt with pre-filtered list — only send essential fields
+        // ── 7. Build character list for prompt ────────────────────────────────
+        // New field names: goes_by, hearts_desire, life_path
         prompt += "Available Airdaeya Characters:\n";
         finalChars.forEach(charData => {
-            const displayName = charData.goesBy || charData.name;
-            const pronouns = charData.pronouns || 'they/them';
-            prompt += `- ${charData.name} (goes by: ${displayName}, pronouns: ${pronouns}): ${charData.description || 'No description available.'}\n`;
-            if (charData.expression !== undefined) prompt += `  Expression Number: ${charData.expression}.\n`;
-            if (charData.heartsDesire !== undefined) prompt += `  Hearts Desire Number: ${charData.heartsDesire}.\n`;
-            if (charData.lifePath !== undefined) prompt += `  Life Path Number: ${charData.lifePath}.\n`;
-            if (charData.personality !== undefined) prompt += `  Personality Number: ${charData.personality}.\n`;
+            const displayName = charData.goes_by || charData.name;
+            const pronouns    = charData.pronouns || "they/them";
+            prompt += `- ${charData.name} (goes by: ${displayName}, pronouns: ${pronouns}): ${charData.description || "No description available."}\n`;
+            if (charData.expression   !== undefined) prompt += `  Expression Number: ${charData.expression}.\n`;
+            if (charData.hearts_desire !== undefined) prompt += `  Hearts Desire Number: ${charData.hearts_desire}.\n`;
+            if (charData.life_path     !== undefined) prompt += `  Life Path Number: ${charData.life_path}.\n`;
+            if (charData.personality  !== undefined) prompt += `  Personality Number: ${charData.personality}.\n`;
         });
-        prompt += "IMPORTANT: When referring to characters in your response, always use their preferred name (goes by) and correct pronouns.\n\n";
+        prompt +=
+            "IMPORTANT: When referring to characters in your response, always use their preferred name (goes by) and correct pronouns.\n\n";
 
         console.log("Gemini Prompt constructed:", prompt);
 
-        // 3. Call the Gemini API
+        // ── 8. Call Gemini ────────────────────────────────────────────────────
         try {
-            const result = await model.generateContent(prompt);
+            const result   = await model.generateContent(prompt);
             const response = await result.response;
-            const text = response.text();
+            const text     = response.text();
             console.log("Gemini Response:", text);
 
-            // Match against finalChars (already fetched) — no extra Firestore call needed
-            // Scan only the MATCH section to avoid false positives from character mentions elsewhere
+            // Match the character name from the response
             let matchedCharacterName = null;
-            let matchedPortraitURL = null;
-            let matchedGoesBy = null;
-            let matchedAliases = [];
-            try {
-                const matchSectionStart = text.indexOf('YOUR AIRDAEYA MATCH');
-                const matchSectionText = matchSectionStart !== -1
-                    ? text.substring(matchSectionStart, matchSectionStart + 300).toUpperCase()
-                    : text.substring(0, 300).toUpperCase();
+            let matchedPortraitURL   = null;
+            let matchedGoesBy        = null;
+            let matchedAliases       = [];
 
-                console.log("Scanning match section:", matchSectionText.substring(0, 100));
+            try {
+                const matchSectionStart = text.indexOf("YOUR AIRDAEYA MATCH");
+                const matchSectionText  =
+                    matchSectionStart !== -1
+                        ? text.substring(matchSectionStart, matchSectionStart + 300).toUpperCase()
+                        : text.substring(0, 300).toUpperCase();
 
                 for (const charData of finalChars) {
                     if (!charData.name) continue;
-                    const nameUpper = charData.name.toUpperCase();
-                    const nameParts = nameUpper.split(' ');
-                    const firstName = nameParts[0];
-                    const firstAndLast = nameParts[0] + (nameParts.length > 1 ? ' ' + nameParts[nameParts.length - 1] : '');
-                    const goesByUpper = charData.goesBy ? charData.goesBy.toUpperCase() : null;
+                    const nameUpper      = charData.name.toUpperCase();
+                    const nameParts      = nameUpper.split(" ");
+                    const firstName      = nameParts[0];
+                    const firstAndLast   =
+                        nameParts[0] + (nameParts.length > 1 ? " " + nameParts[nameParts.length - 1] : "");
+                    const goesByUpper    = charData.goes_by ? charData.goes_by.toUpperCase() : null;
 
-                    // Check full name, first+last, first name, AND goesBy name
-                    if (matchSectionText.includes(nameUpper) ||
+                    if (
+                        matchSectionText.includes(nameUpper) ||
                         matchSectionText.includes(firstAndLast) ||
                         matchSectionText.includes(firstName) ||
-                        (goesByUpper && matchSectionText.includes(goesByUpper))) {
+                        (goesByUpper && matchSectionText.includes(goesByUpper))
+                    ) {
                         matchedCharacterName = charData.name;
-                        matchedPortraitURL = charData.portraitURL || charData.drakkaenPortraitURL || null;
-                        matchedGoesBy = charData.goesBy || null;
-                        matchedAliases = charData.aliases || [];
-                        console.log("Match found:", matchedCharacterName, "goesBy:", matchedGoesBy);
-                        break; // Stop at first match in the match section
+                        matchedGoesBy        = charData.goes_by || null;
+                        matchedAliases       = charData.aliases || [];
+
+                        // Return the raw storage path — the client resolves it to a download URL.
+                        // This avoids needing signBlob IAM permissions in the Cloud Function.
+                        const portraitPath = charData.drakkaen_portrait || charData.portrait || null;
+                        matchedPortraitURL = portraitPath; // e.g. "Characters/Bell_Portrait.jpg"
+
+                        console.log("Match found:", matchedCharacterName, "portraitPath:", portraitPath);
+                        break;
                     }
                 }
             } catch (e) {
                 console.warn("Could not match character:", e);
             }
-            return { matchResult: text, matchedCharacterName, matchedPortraitURL, matchedGoesBy, matchedAliases };
+
+            return {
+                matchResult: text,
+                matchedCharacterName,
+                matchedPortraitURL,
+                matchedGoesBy,
+                matchedAliases,
+            };
         } catch (error) {
             console.error("Error calling Gemini API:", error);
-            let errorMessage = 'Failed to get a response from the AI model.';
-            if (error.response && error.response.statusText) {
-                errorMessage += ` Status: ${error.response.status} - ${error.response.statusText}`;
-            } else if (error.message) {
-                errorMessage += ` Error: ${error.message}`;
-            }
-            throw new HttpsError('internal', errorMessage, error);
+            let errorMessage = "Failed to get a response from the AI model.";
+            if (error.message) errorMessage += ` Error: ${error.message}`;
+            throw new HttpsError("internal", errorMessage, error);
         }
-    });
+    }
+);

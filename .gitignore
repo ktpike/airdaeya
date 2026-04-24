@@ -75,3 +75,7 @@ firestore-export.json
 exportData.mjs 
 Airdaeium code before reCAPTCHA.docx 
 package-lock.json 
+
+# Firebase Secrets
+*-adminsdk-*.json
+airdaeya-firebase-adminsdk-fbsvc-347cc4a322.json

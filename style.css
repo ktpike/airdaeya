@@ -662,7 +662,8 @@ h1.character-detail-name {
     font-style: italic;
 }
 
-.calendar-today-panel .today-special {
+.calendar-today-panel .today-special,
+.converter-result .birthday-message {
     font-family: var(--font-header);
     font-size: 1em;
     color: #FFD700;

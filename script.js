@@ -11,46 +11,117 @@ const firebaseConfig = {
   appId: "1:809753474986:web:153ba16b11ec9c4ca2ddd3",
 };
 
-// Initialize Firebase App
 const app = firebase.initializeApp(firebaseConfig);
+console.log("Firebase initialized.");
 
-// App Check DISABLED - re-enable once reCAPTCHA is properly configured
-// const appCheck = firebase.appCheck(app);
-// appCheck.activate(...);
-console.log("Firebase App Check activated with reCAPTCHA Enterprise.");
-
-// Initialize other Firebase services
 const db = firebase.firestore();
 const functions = firebase.functions();
+const storage = firebase.storage();
 
 // =================================================================================
-// 2. Quiz Variables
+// 2. Storage URL Helper
+// =================================================================================
+
+// Converts a storage file path (e.g. "Characters/Qat_Portrait.png") to a
+// signed download URL using the Firebase Storage SDK.
+const storageURLCache = {};
+
+async function getStorageURL(filePath) {
+    if (!filePath) return null;
+    if (storageURLCache[filePath]) return storageURLCache[filePath];
+    try {
+        const ref = storage.ref(filePath);
+        const url = await ref.getDownloadURL();
+        storageURLCache[filePath] = url;
+        return url;
+    } catch (e) {
+        console.warn(`Could not get storage URL for "${filePath}":`, e);
+        return null;
+    }
+}
+
+
+// Logo path cache — populated by discoverLogoPaths() on first use
+const LOGO_PATHS = {};
+
+async function discoverLogoPaths() {
+    if (LOGO_PATHS._discovered) return;
+    try {
+        const listResult = await storage.ref('Logos').listAll();
+        listResult.items.forEach(item => {
+            const name = item.name.toLowerCase();
+            if (name.includes('airdaeium') && (name.includes('icon') || name.includes('logo'))) {
+                if (!name.includes('black') && !name.includes('white') && !name.includes('extended')) {
+                    LOGO_PATHS.icon = item.fullPath;
+                }
+            }
+            if (name.includes('ktpike') || name.includes('kt pike') || name.includes('kt_pike')) {
+                if (name.includes('black')) LOGO_PATHS.ktpikeBlack = item.fullPath;
+                else if (name.includes('white')) LOGO_PATHS.ktpikeWhite = item.fullPath;
+                else if (!LOGO_PATHS.ktpikeBlack && !LOGO_PATHS.ktpikeWhite) LOGO_PATHS.ktpike = item.fullPath;
+            }
+        });
+        LOGO_PATHS._discovered = true;
+        console.log('Discovered logo paths:', LOGO_PATHS);
+    } catch (e) {
+        console.warn('Could not list Logos folder:', e);
+        LOGO_PATHS._discovered = true;
+    }
+}
+
+async function getLogoURL(type) {
+    await discoverLogoPaths();
+    const path = type === 'icon'       ? LOGO_PATHS.icon :
+                 type === 'ktpike-black' ? (LOGO_PATHS.ktpikeBlack || LOGO_PATHS.ktpike) :
+                 type === 'ktpike-white' ? (LOGO_PATHS.ktpikeWhite || LOGO_PATHS.ktpike) : null;
+    if (!path) return null;
+    return getStorageURL(path);
+}
+
+
+// Normalises whatever is stored in portrait to a full "Characters/Filename.ext" path.
+// Handles: already-full path, filename-only, or gs:// URI.
+function resolvePortraitPath(raw) {
+    if (!raw) return null;
+    // Strip gs://bucket/ prefix if present
+    raw = raw.replace(/^gs:\/\/[^/]+\//, '');
+    // If it already starts with "Characters/" we're done
+    if (raw.startsWith('Characters/')) return raw;
+    // Otherwise treat it as a bare filename
+    return 'Characters/' + raw;
+}
+
+// FIX: Placeholder data URI — avoids the via.placeholder.com external request error
+const PLACEHOLDER_IMG = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22100%22 height%3D%22100%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
+const PLACEHOLDER_IMG_LARGE = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22200%22 height%3D%22200%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
+
+// =================================================================================
+// 3. Quiz Variables
 // =================================================================================
 let quizQuestions = [];
 let currentQuestionIndex = 0;
 let userAnswers = {};
 
 // =================================================================================
-// 2b. Character Birthday Cache
+// 4. Character Birthday Cache
 // =================================================================================
-let characterBirthdays = null; // null = not yet loaded, [] = loaded but empty
+let characterBirthdays = null; // null = not yet loaded
 
 async function loadCharacterBirthdays() {
-    if (characterBirthdays !== null) return; // already loaded
+    if (characterBirthdays !== null) return;
     try {
         const snapshot = await db.collection('characters').get();
         characterBirthdays = [];
         snapshot.forEach(doc => {
             const data = doc.data();
             if (!data.birthday) return;
-            // Parse "year: 14887, tritquarter: 5, day: 13"
-            const tqMatch = data.birthday.match(/tritquarter:\s*(\d+)/i);
-            const dayMatch = data.birthday.match(/day:\s*(\d+)/i);
-            if (tqMatch && dayMatch) {
+            const tq  = data.birthday.tritquarter;
+            const day = data.birthday.day;
+            if (tq && day) {
                 characterBirthdays.push({
-                    name: data.goesBy || data.name || 'Unknown',
-                    tq: parseInt(tqMatch[1]),
-                    day: parseInt(dayMatch[1])
+                    name: data.goes_by || data.name || 'Unknown',
+                    tq: parseInt(tq),
+                    day: parseInt(day)
                 });
             }
         });
@@ -70,314 +141,263 @@ function renderBirthdayMessage(characters) {
     if (!characters || characters.length === 0) return '';
     const names = characters.map(c => c.name).join(' & ');
     const emoji = characters.length === 1 ? '🎂' : '🎉';
-    return `<div class="today-special">${emoji} Happy Birthday, ${names}!</div>`;
+    // FIX: Added class "birthday-message" for theme-aware styling
+    return `<div class="today-special birthday-message">${emoji} Happy Birthday, ${names}!</div>`;
 }
 
 // =================================================================================
-// 3. Theme Toggle Logic
+// 5. Theme Toggle Logic
 // =================================================================================
 
 function applyTheme(isDarkMode) {
     document.body.classList.toggle('dark-mode', isDarkMode);
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
-    const themeToggleButton = document.getElementById('theme-toggle');
-    if (themeToggleButton) {
-        themeToggleButton.textContent = isDarkMode ? '☀️' : '🌙';
-    }
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = isDarkMode ? '☀️' : '🌙';
 }
 
 function initializeTheme() {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark') {
         applyTheme(true);
-    } else if (savedTheme === 'light') {
+    } else if (saved === 'light') {
         applyTheme(false);
     } else {
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            applyTheme(true);
-        } else {
-            applyTheme(false);
-        }
+        applyTheme(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
     }
 }
 
 // =================================================================================
-// 4. Navigation Functions
+// 6. Navigation Helper
+// =================================================================================
+
+function getContainer() {
+    return document.querySelector('.container');
+}
+
+// =================================================================================
+// 7. Home Screen
 // =================================================================================
 
 function displayHomeScreen() {
-    const characterDisplayArea = document.querySelector('.container');
-    if (!characterDisplayArea) {
-        console.error("'.container' element not found in HTML. Cannot display home screen.");
-        return;
-    }
+    const el = getContainer();
+    if (!el) return;
 
-    characterDisplayArea.innerHTML = `
-        <h1>Welcome to Airdaeium</h1>
+    el.innerHTML = `
+        <h1>Welcome to the Tales of Airdaeya compendium</h1>
         <p class="welcome-subtitle">Explore the vast lore of the Airdaeya universe!</p>
         <div class="home-buttons">
-            <button id="view-characters-btn" class="action-button">View Characters</button>
-            <button id="view-calendar-btn" class="action-button">Oram Calendar</button>
-            <button id="start-quiz-btn" class="action-button">Personality Quiz</button>
+            <button id="view-characters-btn" class="action-button">Character List</button>
+            <button id="view-calendar-btn"   class="action-button">Calendar Converter</button>
+            <button id="start-quiz-btn"      class="action-button">Personality Quiz</button>
         </div>
     `;
 
     document.getElementById('view-characters-btn').addEventListener('click', displayCharacterList);
-    document.getElementById('view-calendar-btn').addEventListener('click', displayOramCalendar);
+    document.getElementById('view-calendar-btn').addEventListener('click', displayCalendarConverter);
     document.getElementById('start-quiz-btn').addEventListener('click', displayPersonalityQuiz);
 }
 
+// =================================================================================
+// 8. Character List
+// =================================================================================
 
 async function displayCharacterList() {
-    const characterDisplayArea = document.querySelector('.container');
-    if (!characterDisplayArea) {
-        console.error("'.container' element not found in HTML. Cannot display character list.");
-        return;
-    }
-
-    characterDisplayArea.innerHTML = `<h2>Loading characters...</h2>`;
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading characters...</h2>`;
 
     try {
-        // ── Step 1: Fetch everything in parallel ─────────────────────────────
-        // Full path: chronicles/{c}/collections/{col}/sagas/{s}/books/{b}
-        // We fetch collection group queries for books and sagas,
-        // plus the known collections subcollection for collection-level metadata.
-        const [charactersSnapshot, booksGroupSnapshot, sagasGroupSnapshot, collectionsSnapshot] = await Promise.all([
+        // ── Fetch all flat collections in parallel ──────────────────────────
+        const [
+            worldsSnap,
+            groupsSnap,
+            booksSnap,
+            charactersSnap,
+            appearancesSnap
+        ] = await Promise.all([
+            db.collection('worlds').orderBy('world_number').get(),
+            db.collection('groups').get(),
+            db.collection('books').get(),
             db.collection('characters').get(),
-            db.collectionGroup('books').get(),
-            db.collectionGroup('sagas').get(),
-            db.collection('chronicles').get().then(async chroniclesSnap => {
-                // Fetch each chronicle's collections subcollection
-                const allCollDocs = [];
-                await Promise.all(chroniclesSnap.docs.map(async chronicleDoc => {
-                    const collSnap = await chronicleDoc.ref.collection('collections').get();
-                    collSnap.forEach(doc => allCollDocs.push({ _path: doc.ref.path, id: doc.id, ...doc.data() }));
-                }));
-                return allCollDocs;
-            })
+            db.collection('appearances').get()
         ]);
 
-        const allCharacters = [];
-        charactersSnapshot.forEach(doc => allCharacters.push({ id: doc.id, ...doc.data() }));
+        // ── Build lookup maps ───────────────────────────────────────────────
+        const worldMap = {};
+        worldsSnap.forEach(doc => { worldMap[doc.id] = { id: doc.id, ...doc.data() }; });
 
-        // ── Step 2: Build lookup maps ─────────────────────────────────────────
+        const groupMap = {};
+        groupsSnap.forEach(doc => { groupMap[doc.id] = { id: doc.id, ...doc.data() }; });
 
-        // bookMap: Firestore path → book data
         const bookMap = {};
-        booksGroupSnapshot.forEach(doc => {
-            bookMap[doc.ref.path] = { _path: doc.ref.path, ...doc.data() };
+        booksSnap.forEach(doc => { bookMap[doc.id] = { id: doc.id, ...doc.data() }; });
+
+        const characterMap = {};
+        charactersSnap.forEach(doc => { characterMap[doc.id] = { id: doc.id, ...doc.data() }; });
+
+        // appearances: character_id → [{book_id, role}]
+        const charAppearances = {}; // character_id → [{book_id, role}]
+        const bookCharacters  = {}; // book_id → [{character_id, role}]
+        appearancesSnap.forEach(doc => {
+            const { character_id, book_id, role } = doc.data();
+            if (!charAppearances[character_id]) charAppearances[character_id] = [];
+            charAppearances[character_id].push({ book_id, role });
+            if (!bookCharacters[book_id]) bookCharacters[book_id] = [];
+            bookCharacters[book_id].push({ character_id, role });
         });
 
-        // sagaMetaMap: sagaDocId → saga doc data (sagaName, sagaURL, sagaOrder, _path)
-        // Key by full path to handle duplicate saga IDs across different collections
-        const sagaMetaMap = {}; // key: sagaDocId, value: saga meta (last write wins — IDs should be unique)
-        const sagaMetaByPath = {}; // key: full path
-        sagasGroupSnapshot.forEach(doc => {
-            const meta = { _path: doc.ref.path, id: doc.id, ...doc.data() };
-            sagaMetaMap[doc.id] = meta;
-            sagaMetaByPath[doc.ref.path] = meta;
-        });
-
-        // collectionMetaMap: collectionDocId → collection doc data
-        const collectionMetaMap = {};
-        collectionsSnapshot.forEach(col => {
-            collectionMetaMap[col.id] = col;
-        });
-
-        // ── Step 3: Path parser & helpers ────────────────────────────────────
-        // chronicles/talesOfAirdaeya/collections/adventuresOnOram/sagas/drakkaenNakkla/books/catchingQat
-        // index:  0        1               2           3               4       5           6       7
-        function parsePath(path) {
-            const parts = path.replace(/^\//, '').split('/');
-            return {
-                chronicleId:  parts[1] || '',
-                collectionId: parts[3] || '',
-                sagaId:       parts[5] || '',
-                bookId:       parts[7] || '',
-            };
-        }
-
-        function toTitleCase(str) {
-            return str
-                .replace(/([A-Z])/g, ' $1')
-                .replace(/[-_]/g, ' ')
-                .replace(/\b\w/g, c => c.toUpperCase())
-                .trim();
-        }
-
-        function parseReleaseDate(book) {
-            if (!book || !book.releaseDate) return null;
-            const d = new Date(book.releaseDate);
-            return isNaN(d.getTime()) ? null : d;
-        }
-
+        // ── Helpers ─────────────────────────────────────────────────────────
         const now = new Date();
+
+        function isBookVisible(book) {
+            // Show if released, or has a future release_date, or has a release_note
+            if (!book) return false;
+            if (book.released === true) return true;
+            if (book.release_note && book.release_note.trim()) return true;
+            if (book.release_date) {
+                const d = new Date(book.release_date);
+                return !isNaN(d.getTime()); // any date present → show
+            }
+            return false;
+        }
+
         function isBookReleased(book) {
             if (!book) return false;
             if (book.released === true) return true;
-            const rd = parseReleaseDate(book);
-            return rd !== null && rd <= now;
-        }
-
-        function bookSortOrder(book) {
-            return book.bookOrder1 ?? book.bookOrder ?? 0;
-        }
-
-        // ── Step 4: Build collectionMap → sagaMap → bookEntries ──────────────
-        // collectionMap: collectionId → { meta, sagas: { sagaId → { meta, bookEntries } } }
-        const collectionMap = {};
-
-        function ensureCollection(collectionId) {
-            if (!collectionMap[collectionId]) {
-                const meta = collectionMetaMap[collectionId] || {};
-                collectionMap[collectionId] = {
-                    collectionId,
-                    collectionLabel: meta.collectionName || toTitleCase(collectionId),
-                    collectionURL:   meta.collectionURL  || null,
-                    collectionOrder: meta.collectionOrder ?? 999,
-                    sagas: {},
-                };
+            if (book.release_date) {
+                const d = new Date(book.release_date);
+                return !isNaN(d.getTime()) && d <= now;
             }
-            return collectionMap[collectionId];
+            return false;
         }
 
-        function ensureSaga(collectionId, sagaId) {
-            const collection = ensureCollection(collectionId);
-            if (!collection.sagas[sagaId]) {
-                const meta = sagaMetaMap[sagaId] || {};
-                collection.sagas[sagaId] = {
-                    sagaId,
-                    sagaLabel: meta.sagaName || toTitleCase(sagaId),
-                    sagaURL:   meta.sagaURL  || null,
-                    sagaOrder: meta.sagaOrder ?? 999,
-                    bookEntries: {},
-                };
+        function getReleaseLabel(book) {
+            if (book.release_note && book.release_note.trim()) return book.release_note.trim();
+            if (book.release_date) {
+                const d = new Date(book.release_date);
+                if (!isNaN(d.getTime()) && d > now) return getReleaseSeason(d);
             }
-            return collection.sagas[sagaId];
+            return 'Coming Soon';
         }
 
-        // Seed from saga documents — catches sagas with no books yet (e.g. The Valore)
-        for (const [sagaId, sagaMeta] of Object.entries(sagaMetaMap)) {
-            const { collectionId } = parsePath(sagaMeta._path);
-            if (!collectionId) continue;
-            ensureSaga(collectionId, sagaId);
+        // ── Build world → group → book → character tree ─────────────────────
+        // Sort worlds by world_number
+        const sortedWorlds = Object.values(worldMap).sort((a, b) => (a.world_number || 0) - (b.world_number || 0));
+
+        // Sort groups by world then group_order
+        const groupsByWorld = {};
+        Object.values(groupMap).forEach(g => {
+            const wid = g.world_id;
+            if (!groupsByWorld[wid]) groupsByWorld[wid] = [];
+            groupsByWorld[wid].push(g);
+        });
+        for (const wid in groupsByWorld) {
+            groupsByWorld[wid].sort((a, b) => (Number(a.group_order) || 0) - (Number(b.group_order) || 0));
         }
 
-        // Seed from all book documents
-        for (const [path, book] of Object.entries(bookMap)) {
-            const { collectionId, sagaId } = parsePath(path);
-            if (!collectionId || !sagaId) continue;
-            const saga = ensureSaga(collectionId, sagaId);
-
-            const isReleased = isBookReleased(book);
-            const hasFutureDate = !isReleased && !!(book.releaseDate);
-
-            if (!saga.bookEntries[path]) {
-                saga.bookEntries[path] = {
-                    book,
-                    chars: [],
-                    isFuture:   hasFutureDate,
-                    isAnnounced: !isReleased && !hasFutureDate,
-                };
-            }
+        // Sort books by group then book_order
+        const booksByGroup = {};
+        Object.values(bookMap).forEach(b => {
+            const gid = b.group_id;
+            if (!booksByGroup[gid]) booksByGroup[gid] = [];
+            booksByGroup[gid].push(b);
+        });
+        for (const gid in booksByGroup) {
+            booksByGroup[gid].sort((a, b) => (a.book_order || 0) - (b.book_order || 0));
         }
 
-        // ── Step 5: Assign characters to their first released book ───────────
-        for (const char of allCharacters) {
-            if (!Array.isArray(char.bookAppearances) || char.bookAppearances.length === 0) continue;
-            for (const appearance of char.bookAppearances) {
-                const path = appearance.bookID && appearance.bookID.path;
-                if (!path) continue;
-                if (!appearance.role || appearance.role.toLowerCase() === 'cloaked') continue;
-                const book = bookMap[path];
-                if (!isBookReleased(book)) continue;
-                const { collectionId, sagaId } = parsePath(path);
-                const saga = collectionMap[collectionId]?.sagas[sagaId];
-                if (saga && saga.bookEntries[path]) {
-                    saga.bookEntries[path].chars.push({ ...char, _listRole: appearance.role });
+        // ── FIX: For each character, find first VISIBLE (not just released) book per group ──
+        // This ensures characters in upcoming/announced books still appear under Book 1
+        // charFirstVisibleBookPerGroup[charId][groupId] = book_id of first visible appearance
+        const charFirstVisibleBookPerGroup = {};
+        Object.keys(characterMap).forEach(cid => {
+            charFirstVisibleBookPerGroup[cid] = {};
+            const appearances = charAppearances[cid] || [];
+            appearances.forEach(({ book_id, role }) => {
+                if (role === 'cloaked') return;
+                const book = bookMap[book_id];
+                if (!book || !isBookVisible(book)) return;
+                const gid = book.group_id;
+                if (!charFirstVisibleBookPerGroup[cid][gid]) {
+                    charFirstVisibleBookPerGroup[cid][gid] = book_id;
+                } else {
+                    // Keep the earlier book_order
+                    const existing = bookMap[charFirstVisibleBookPerGroup[cid][gid]];
+                    if ((book.book_order || 0) < (existing.book_order || 0)) {
+                        charFirstVisibleBookPerGroup[cid][gid] = book_id;
+                    }
                 }
-                break;
-            }
-        }
-
-        // ── Step 6: Sort everything ───────────────────────────────────────────
-        const sortedCollections = Object.values(collectionMap).sort((a, b) => {
-            if (a.collectionOrder !== b.collectionOrder) return a.collectionOrder - b.collectionOrder;
-            return a.collectionLabel.localeCompare(b.collectionLabel);
+            });
         });
 
-        for (const collection of sortedCollections) {
-            collection.sortedSagas = Object.values(collection.sagas).sort((a, b) => {
-                if (a.sagaOrder !== b.sagaOrder) return a.sagaOrder - b.sagaOrder;
-                return a.sagaLabel.localeCompare(b.sagaLabel);
-            });
-            for (const saga of collection.sortedSagas) {
-                saga.sortedBooks = Object.values(saga.bookEntries)
-                    .sort((a, b) => bookSortOrder(a.book) - bookSortOrder(b.book));
-            }
-        }
-
-        // ── Step 7: Render ────────────────────────────────────────────────────
-        characterDisplayArea.innerHTML = `
+        // ── Render ──────────────────────────────────────────────────────────
+        el.innerHTML = `
             <button class="back-button" id="back-to-home-btn">← Back to Home</button>
-            <h1>All Characters</h1>
+            <h1>Character List</h1>
             <div class="character-list-structured"></div>
         `;
         document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
 
-        const structuredList = characterDisplayArea.querySelector('.character-list-structured');
+        const structuredList = el.querySelector('.character-list-structured');
 
-        for (const collection of sortedCollections) {
-            const collectionSection = document.createElement('div');
-            collectionSection.classList.add('collection-section');
+        for (const world of sortedWorlds) {
+            const groups = groupsByWorld[world.id] || [];
+            if (groups.length === 0) continue;
 
-            // Collection header
-            const collectionHeader = document.createElement('h2');
-            collectionHeader.classList.add('collection-header');
-            if (collection.collectionURL) {
-                collectionHeader.innerHTML = `<a href="${collection.collectionURL}" target="_blank" rel="noopener">${collection.collectionLabel}</a>`;
-            } else {
-                collectionHeader.textContent = collection.collectionLabel;
-            }
-            collectionSection.appendChild(collectionHeader);
+            const worldSection = document.createElement('div');
+            worldSection.classList.add('collection-section');
 
-            for (const saga of collection.sortedSagas) {
-                const sagaSection = document.createElement('div');
-                sagaSection.classList.add('saga-section');
+            // World header — FIX: link whenever world_url is present
+            const worldHeader = document.createElement('h2');
+            worldHeader.classList.add('collection-header');
+            const worldURL = world.world_url || world.url || null;
+            worldHeader.innerHTML = worldURL
+                ? `<a href="${worldURL}" target="_blank" rel="noopener">${world.world_title || world.world_name}</a>`
+                : (world.world_title || world.world_name);
+            worldSection.appendChild(worldHeader);
 
-                // Saga header
-                const sagaHeader = document.createElement('h3');
-                sagaHeader.classList.add('saga-header');
-                if (saga.sagaURL) {
-                    sagaHeader.innerHTML = `<a href="${saga.sagaURL}" target="_blank" rel="noopener">${saga.sagaLabel}</a>`;
-                } else {
-                    sagaHeader.textContent = saga.sagaLabel;
-                }
-                sagaSection.appendChild(sagaHeader);
+            for (const group of groups) {
+                const books = (booksByGroup[group.id] || []).filter(isBookVisible);
+                if (books.length === 0) continue;
 
-                saga.sortedBooks.forEach(({ book, chars, isFuture, isAnnounced }, bookIndex) => {
+                const groupSection = document.createElement('div');
+                groupSection.classList.add('saga-section');
+
+                // Group header — FIX: link whenever group_url is present
+                const groupHeader = document.createElement('h3');
+                groupHeader.classList.add('saga-header');
+                const groupURL = group.group_url || group.url || null;
+                groupHeader.innerHTML = groupURL
+                    ? `<a href="${groupURL}" target="_blank" rel="noopener">${group.group_title}</a>`
+                    : group.group_title;
+                groupSection.appendChild(groupHeader);
+
+                books.forEach((book, bookIndex) => {
+                    const released = isBookReleased(book);
                     const bookSection = document.createElement('div');
                     bookSection.classList.add('book-section');
 
-                    // Book header
+                    // Book header — FIX: link whenever book_url is present (released OR not)
                     const bookHeader = document.createElement('h4');
                     bookHeader.classList.add('book-header');
-                    const bookTitle = book.title || 'Untitled';
+                    const bookTitle = book.book_title || 'Untitled';
 
-                    if (isFuture) {
-                        const rd = parseReleaseDate(book);
-                        const label = rd ? getReleaseSeason(rd) : 'Coming Soon';
-                        bookHeader.innerHTML = `${bookTitle} <span class="coming-soon-label">${label}</span>`;
-                    } else if (isAnnounced) {
-                        bookHeader.innerHTML = `${bookTitle} <span class="coming-soon-label">Coming Soon</span>`;
-                    } else if (book.bookURL) {
-                        bookHeader.innerHTML = `<a href="${book.bookURL}" target="_blank" rel="noopener">${bookTitle}</a>`;
+                    if (!released) {
+                        const label = getReleaseLabel(book);
+                        // FIX: Still link the title if a URL is available, even for unreleased books
+                        const titlePart = book.book_url
+                            ? `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`
+                            : bookTitle;
+                        bookHeader.innerHTML = `${titlePart} <span class="coming-soon-label">${label}</span>`;
+                    } else if (book.book_url) {
+                        bookHeader.innerHTML = `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`;
                     } else {
                         bookHeader.textContent = bookTitle;
                     }
                     bookSection.appendChild(bookHeader);
 
-                    // "New Characters!" banner for book 2+
+                    // "New Characters!" banner for book 2+ in a group
                     if (bookIndex > 0) {
                         const newBanner = document.createElement('p');
                         newBanner.classList.add('new-characters-banner');
@@ -385,57 +405,67 @@ async function displayCharacterList() {
                         bookSection.appendChild(newBanner);
                     }
 
-                    if (!isFuture && !isAnnounced && chars.length > 0) {
-                        const mainChars = chars
-                            .filter(c => c._listRole === 'POV' || c._listRole === 'Primary')
-                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-                        const additionalChars = chars
-                            .filter(c => c._listRole === 'Secondary')
-                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-                        const knownRoles = ['POV', 'Primary', 'Secondary'];
-                        const otherChars = chars
-                            .filter(c => !knownRoles.includes(c._listRole))
-                            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                    // Characters for this book:
+                    // • POV characters appear on EVERY visible book in the group (readers always
+                    //   know whose viewpoint it is, even before the book releases).
+                    // • primary/secondary characters appear only on the first visible book where
+                    //   they are introduced (tracked via charFirstVisibleBookPerGroup).
+                    const bookChars = bookCharacters[book.id] || [];
 
-                        function appendRoleSection(label, charList) {
-                            if (charList.length === 0) return;
-                            const section = document.createElement('div');
-                            section.classList.add('role-section');
-                            const roleLabel = document.createElement('p');
-                            roleLabel.classList.add('role-label');
-                            roleLabel.textContent = label;
-                            section.appendChild(roleLabel);
-                            const grid = document.createElement('div');
-                            grid.classList.add('character-list-grid');
-                            charList.forEach(char => appendCharacterCard(grid, char));
-                            section.appendChild(grid);
-                            bookSection.appendChild(section);
-                        }
+                    // Collect all POV chars that have an appearance record for this book
+                    const povChars = bookChars
+                        .filter(({ role }) => role === 'POV')
+                        .sort((a, b) => (characterMap[a.character_id]?.name || '').localeCompare(characterMap[b.character_id]?.name || ''));
 
-                        appendRoleSection('Main Characters', mainChars);
-                        appendRoleSection('Additional Characters', additionalChars);
-                        if (otherChars.length > 0) {
-                            const grid = document.createElement('div');
-                            grid.classList.add('character-list-grid');
-                            otherChars.forEach(char => appendCharacterCard(grid, char));
-                            bookSection.appendChild(grid);
-                        }
+                    // Collect primary/secondary chars whose FIRST visible book in this group is this book
+                    const introChars = bookChars
+                        .filter(({ character_id, role }) => {
+                            if (role === 'cloaked' || role === 'POV') return false;
+                            return charFirstVisibleBookPerGroup[character_id]?.[group.id] === book.id;
+                        })
+                        .sort((a, b) => (characterMap[a.character_id]?.name || '').localeCompare(characterMap[b.character_id]?.name || ''));
+
+                    const mainChars = [
+                        ...povChars,
+                        ...introChars.filter(c => c.role === 'primary')
+                    ];
+                    const additionalChars = introChars.filter(c => c.role === 'secondary');
+
+                    function appendRoleSection(label, charList) {
+                        if (charList.length === 0) return;
+                        const section = document.createElement('div');
+                        section.classList.add('role-section');
+                        const roleLabel = document.createElement('p');
+                        roleLabel.classList.add('role-label');
+                        roleLabel.textContent = label;
+                        section.appendChild(roleLabel);
+                        const grid = document.createElement('div');
+                        grid.classList.add('character-list-grid');
+                        charList.forEach(({ character_id }) => {
+                            const charData = characterMap[character_id];
+                            if (charData) appendCharacterCard(grid, charData, released);
+                        });
+                        section.appendChild(grid);
+                        bookSection.appendChild(section);
                     }
 
-                    sagaSection.appendChild(bookSection);
+                    appendRoleSection('Main Characters', mainChars);
+                    appendRoleSection('Additional Characters', additionalChars);
+
+                    groupSection.appendChild(bookSection);
                 });
 
-                collectionSection.appendChild(sagaSection);
+                worldSection.appendChild(groupSection);
             }
 
-            structuredList.appendChild(collectionSection);
+            structuredList.appendChild(worldSection);
         }
 
-        console.log("Character list rendered with collection/saga/book/role structure.");
+        console.log("Character list rendered.");
 
     } catch (error) {
-        console.error("Error fetching characters:", error);
-        characterDisplayArea.innerHTML = `
+        console.error("Error fetching character list:", error);
+        el.innerHTML = `
             <button class="back-button" id="back-to-home-btn">← Back to Home</button>
             <h2>Error loading character list!</h2>
         `;
@@ -443,9 +473,9 @@ async function displayCharacterList() {
     }
 }
 
-// Returns a human-readable season string like "Coming Fall 2027" from a future Date
+// Returns "Coming Spring 2028" style label from a future Date
 function getReleaseSeason(date) {
-    const month = date.getMonth() + 1; // 1-12
+    const month = date.getMonth() + 1;
     const year = date.getFullYear();
     let season;
     if (month >= 3 && month <= 5)       season = 'Spring';
@@ -455,96 +485,112 @@ function getReleaseSeason(date) {
     return `Coming ${season} ${year}`;
 }
 
-// Renders a single character card into a grid container
-function appendCharacterCard(container, characterData) {
-    const characterId = characterData.id;
-    const characterListItem = document.createElement('div');
-    characterListItem.classList.add('character-list-item');
-    characterListItem.dataset.characterId = characterId;
-    characterListItem.addEventListener('click', () => displayCharacterDetails(characterId));
+// Portraits load for any visible book (released OR announced with release_date/release_note).
+// The `released` param is kept for potential future use but no longer gates portrait loading.
+function appendCharacterCard(container, charData, released = true) {
+    const item = document.createElement('div');
+    item.classList.add('character-list-item');
+    item.dataset.characterId = charData.id;
+    item.addEventListener('click', () => displayCharacterDetails(charData.id));
 
-    const characterImageElement = document.createElement('img');
-    if (characterData.portraitURL || characterData.drakkaenPortraitURL) {
-        characterImageElement.src = characterData.portraitURL || characterData.drakkaenPortraitURL;
-        characterImageElement.alt = `Portrait of ${characterData.name}`;
+    const img = document.createElement('img');
+    img.alt = `Portrait of ${charData.name}`;
+    img.classList.add('character-list-portrait');
+    img.src = PLACEHOLDER_IMG;
+
+    // Always attempt to load the portrait for any visible character
+    const portraitPath = resolvePortraitPath(charData.portrait);
+    if (portraitPath) {
+        getStorageURL(portraitPath).then(url => {
+            if (url) { img.src = url; return; }
+            // Portrait file not found — use the Firebase hooded traveler placeholder
+            getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => {
+                if (ph) img.src = ph;
+            });
+        });
     } else {
-        characterImageElement.src = 'https://via.placeholder.com/100x100?text=No+Image';
-        characterImageElement.alt = 'No image available';
+        getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => {
+            if (ph) img.src = ph;
+        });
     }
-    characterImageElement.classList.add('character-list-portrait');
-    characterListItem.appendChild(characterImageElement);
 
-    const characterTextContent = document.createElement('div');
-    characterTextContent.classList.add('character-list-text');
+    item.appendChild(img);
 
-    const characterNameElement = document.createElement('h3');
-    characterNameElement.textContent = characterData.name;
+    const text = document.createElement('div');
+    text.classList.add('character-list-text');
 
-    const characterDescriptionElement = document.createElement('p');
-    const shortDescription = characterData.description
-        ? characterData.description.substring(0, 150) + '...'
+    const nameEl = document.createElement('h3');
+    nameEl.textContent = charData.name;
+
+    const descEl = document.createElement('p');
+    descEl.textContent = charData.description
+        ? charData.description.substring(0, 150) + '...'
         : 'No description available.';
-    characterDescriptionElement.textContent = shortDescription;
 
-    characterTextContent.appendChild(characterNameElement);
-    characterTextContent.appendChild(characterDescriptionElement);
-    characterListItem.appendChild(characterTextContent);
-    container.appendChild(characterListItem);
+    text.appendChild(nameEl);
+    text.appendChild(descEl);
+    item.appendChild(text);
+    container.appendChild(item);
 }
 
+// =================================================================================
+// 9. Character Details
+// =================================================================================
 
 async function displayCharacterDetails(characterId) {
-    const characterDisplayArea = document.querySelector('.container');
-    if (!characterDisplayArea) {
-        console.error("'.container' element not found in HTML. Cannot display character details.");
-        return;
-    }
-
-    characterDisplayArea.innerHTML = `<h2>Loading character details...</h2>`;
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading character details...</h2>`;
 
     try {
-        const characterDoc = await db.collection('characters').doc(characterId).get();
+        const doc = await db.collection('characters').doc(characterId).get();
 
-        if (characterDoc.exists) {
-            const characterData = characterDoc.data();
-
-            characterDisplayArea.innerHTML = `
+        if (!doc.exists) {
+            el.innerHTML = `
                 <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
-                <h1 class="character-detail-name">${characterData.name}</h1>
-                <div class="character-detail-content"></div>
+                <h2>Character not found!</h2>
             `;
             document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
-
-            const detailContentWrapper = characterDisplayArea.querySelector('.character-detail-content');
-
-            const characterImageElement = document.createElement('img');
-            if (characterData.portraitURL || characterData.drakkaenPortraitURL) {
-                characterImageElement.src = characterData.portraitURL || characterData.drakkaenPortraitURL;
-                characterImageElement.alt = `Portrait of ${characterData.name}`;
-                characterImageElement.classList.add('character-portrait-detail');
-            } else {
-                characterImageElement.src = 'https://via.placeholder.com/200x200?text=No+Image';
-                characterImageElement.alt = 'No image available';
-                characterImageElement.classList.add('character-portrait-detail');
-            }
-            detailContentWrapper.appendChild(characterImageElement);
-
-            const characterDescriptionElement = document.createElement('p');
-            characterDescriptionElement.textContent = characterData.description || 'No detailed description available.';
-            detailContentWrapper.appendChild(characterDescriptionElement);
-
-            console.log(`Displayed details for character: ${characterData.name}`);
-
-        } else {
-            characterDisplayArea.innerHTML = `
-                <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
-                <h2>Character with ID '${characterId}' not found!</h2>
-            `;
-            document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
+            return;
         }
+
+        const data = doc.data();
+
+        el.innerHTML = `
+            <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
+            <h1 class="character-detail-name">${data.name}</h1>
+            <div class="character-detail-content"></div>
+        `;
+        document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
+
+        const wrapper = el.querySelector('.character-detail-content');
+
+        const img = document.createElement('img');
+        img.alt = `Portrait of ${data.name}`;
+        img.classList.add('character-portrait-detail');
+        // FIX: Use inline data URI placeholder
+        img.src = PLACEHOLDER_IMG_LARGE;
+        wrapper.appendChild(img);
+
+        // Load portrait (prefer drakkaen_portrait if present)
+        console.log("Character data fields:", Object.keys(data), "portrait:", data.portrait);
+        const portraitPath = resolvePortraitPath(data.drakkaen_portrait || data.portrait);
+        if (portraitPath) {
+            getStorageURL(portraitPath).then(url => {
+                if (url) { img.src = url; return; }
+                getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => { if (ph) img.src = ph; });
+            });
+        } else {
+            getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => { if (ph) img.src = ph; });
+        }
+
+        const desc = document.createElement('p');
+        desc.textContent = data.description || 'No description available.';
+        wrapper.appendChild(desc);
+
     } catch (error) {
         console.error("Error fetching character details:", error);
-        characterDisplayArea.innerHTML = `
+        el.innerHTML = `
             <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
             <h2>Error loading character details!</h2>
         `;
@@ -552,22 +598,266 @@ async function displayCharacterDetails(characterId) {
     }
 }
 
+// =================================================================================
+// 10. Calendar Converter
+// =================================================================================
+
+// Runtime calendar data — loaded once from Firestore
+let calendarData = null;
+
+async function loadCalendarData() {
+    if (calendarData) return calendarData;
+
+    // Fetch the first calendar (Oram Standard) plus special_days
+    const [calSnap, sdSnap] = await Promise.all([
+        db.collection('calendars').get(),
+        db.collection('special_days').get()
+    ]);
+
+    // Use the first calendar doc for now; we'll expand this when more worlds are added
+    const calDoc = calSnap.docs[0];
+    if (!calDoc) throw new Error('No calendar data found.');
+
+    const cal = calDoc.data();
+
+    const specialDays = [];
+    sdSnap.forEach(doc => {
+        const d = doc.data();
+        specialDays.push({ tq: d.tq, day: d.tq_day, name: d.sd_name, desc: d.sd_desc });
+    });
+
+    calendarData = {
+        id: calDoc.id,
+        name: cal.name,
+        rules: cal.rules,
+        tritquarters: cal.tritquarters.sort((a, b) => a.tq - b.tq),
+        fortnightNames: cal.fortnight_names,
+        specialDays,
+        seasonEmoji: { Spring: '🌱', Summer: '☀️', Autumn: '🍂', Winter: '❄️' }
+    };
+
+    return calendarData;
+}
+
+// Conversion math (unchanged from old script — anchored to March 20 = Mamdi 1)
+const ORAM_DAYS_PER_EARTH_DAY = 144 / 132;
+
+function earthDateToOramDayOfYear(earthDate) {
+    const march20 = new Date(earthDate.getFullYear(), 2, 20);
+    const earthDaysDiff = (earthDate - march20) / (1000 * 60 * 60 * 24);
+    const raw = 1 + earthDaysDiff * ORAM_DAYS_PER_EARTH_DAY;
+    let oramDayOfYear = Math.round(raw);
+    oramDayOfYear = ((oramDayOfYear - 1) % 396 + 396) % 396 + 1;
+    return oramDayOfYear;
+}
+
+function oramDayOfYearToTritquarter(dayOfYear, tritquarters) {
+    const daysPerTQ = 33;
+    const tqIndex = Math.floor((dayOfYear - 1) / daysPerTQ);
+    const day = ((dayOfYear - 1) % daysPerTQ) + 1;
+    return { tq: tritquarters[tqIndex], day };
+}
+
+function tritquarterToOramDayOfYear(tqNumber, day) {
+    return ((tqNumber - 1) * 33) + day;
+}
+
+function oramDayOfYearToEarthDate(oramDayOfYear) {
+    const year = new Date().getFullYear();
+    const march20 = new Date(year, 2, 20);
+    const estDays = Math.round((oramDayOfYear - 1) / ORAM_DAYS_PER_EARTH_DAY);
+    for (let offset = -5; offset <= 5; offset++) {
+        const candidate = new Date(march20);
+        candidate.setDate(march20.getDate() + estDays + offset);
+        if (earthDateToOramDayOfYear(candidate) === oramDayOfYear) return candidate;
+    }
+    const fallback = new Date(march20);
+    fallback.setDate(march20.getDate() + estDays);
+    return fallback;
+}
+
+function getSpecialDay(tqNumber, day, specialDays) {
+    return specialDays.find(s => s.tq === tqNumber && s.day === day) || null;
+}
+
+function formatOramDate(tqName, day) {
+    return `${tqName} ${day}`;
+}
+
+function formatEarthDate(date) {
+    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+
+async function displayCalendarConverter() {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading calendar...</h2>`;
+
+    try {
+        const cal = await loadCalendarData();
+        await loadCharacterBirthdays();
+
+        const tqOptions = cal.tritquarters.map(tq =>
+            `<option value="${tq.tq}">${tq.tq_name} (Tritquarter ${tq.tq})</option>`
+        ).join('');
+
+        const dayOptions = Array.from({ length: 33 }, (_, i) =>
+            `<option value="${i + 1}">${i + 1}</option>`
+        ).join('');
+
+        el.innerHTML = `
+            <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+            <div class="calendar-container">
+                <h1>${cal.name}</h1>
+                <p class="welcome-subtitle">Convert dates between Earth and the world of Oram</p>
+
+                <div class="calendar-today-panel" id="today-panel"></div>
+
+                <div class="calendar-converters">
+
+                    <div class="converter-panel">
+                        <h3>🌍 Earth → Oram</h3>
+                        <label for="earth-date-input">Enter an Earth Date</label>
+                        <input type="date" id="earth-date-input" />
+                        <button class="convert-btn" id="earth-to-oram-btn">Convert</button>
+                        <div class="converter-result" id="earth-to-oram-result">
+                            <div class="result-date"   id="earth-to-oram-date"></div>
+                            <div class="result-season" id="earth-to-oram-season"></div>
+                            <div class="result-special" id="earth-to-oram-special" style="display:none"></div>
+                        </div>
+                    </div>
+
+                    <div class="converter-panel">
+                        <h3>🪐 Oram → Earth</h3>
+                        <label>Select an Oram Date</label>
+                        <div class="oram-day-select">
+                            <div>
+                                <label for="oram-tq-select">Tritquarter</label>
+                                <select id="oram-tq-select">${tqOptions}</select>
+                            </div>
+                            <div>
+                                <label for="oram-day-select">Day</label>
+                                <select id="oram-day-select">${dayOptions}</select>
+                            </div>
+                        </div>
+                        <button class="convert-btn" id="oram-to-earth-btn">Convert</button>
+                        <div class="converter-result" id="oram-to-earth-result">
+                            <div class="result-date"   id="oram-to-earth-date"></div>
+                            <div class="result-season" id="oram-to-earth-season"></div>
+                            <div class="result-special" id="oram-to-earth-special" style="display:none"></div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        `;
+
+        document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+
+        // ── Today panel ────────────────────────────────────────────────────
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const oramDOY = earthDateToOramDayOfYear(today);
+        const { tq: todayTQ, day: todayDay } = oramDayOfYearToTritquarter(oramDOY, cal.tritquarters);
+        const todaySpecial = getSpecialDay(todayTQ.tq, todayDay, cal.specialDays);
+        const todayBirthdays = getBirthdayCharacters(todayTQ.tq, todayDay);
+        const seasonEmoji = cal.seasonEmoji[todayTQ.tq_season] || '';
+
+        document.getElementById('today-panel').innerHTML = `
+            <div class="today-label">Today on Earth</div>
+            <div class="today-earth">${formatEarthDate(today)}</div>
+            <div class="today-divider">⟡</div>
+            <div class="today-label">Today on Oram</div>
+            <div class="today-oram">${formatOramDate(todayTQ.tq_name, todayDay)}</div>
+            <div class="today-season">${seasonEmoji} ${todayTQ.tq_season} on Oram</div>
+            ${todaySpecial ? `<div class="today-special">✨ ${todaySpecial.name} — ${todaySpecial.desc}</div>` : ''}
+            ${renderBirthdayMessage(todayBirthdays)}
+        `;
+
+        // ── Earth → Oram converter ─────────────────────────────────────────
+        document.getElementById('earth-to-oram-btn').addEventListener('click', () => {
+            const input = document.getElementById('earth-date-input').value;
+            if (!input) { alert('Please select an Earth date.'); return; }
+            const parts = input.split('-').map(Number);
+            const earthDate = new Date(parts[0], parts[1] - 1, parts[2]);
+            const oramDay = earthDateToOramDayOfYear(earthDate);
+            const { tq, day } = oramDayOfYearToTritquarter(oramDay, cal.tritquarters);
+            const special = getSpecialDay(tq.tq, day, cal.specialDays);
+            const emoji = cal.seasonEmoji[tq.tq_season] || '';
+            const birthdays = getBirthdayCharacters(tq.tq, day);
+            const resultEl = document.getElementById('earth-to-oram-result');
+
+            document.getElementById('earth-to-oram-date').textContent = formatOramDate(tq.tq_name, day);
+            document.getElementById('earth-to-oram-season').textContent = `${emoji} ${tq.tq_season} on Oram`;
+            const specialEl = document.getElementById('earth-to-oram-special');
+            if (special) {
+                specialEl.textContent = `✨ ${special.name} — ${special.desc}`;
+                specialEl.style.display = 'inline-block';
+            } else {
+                specialEl.style.display = 'none';
+            }
+            let bdayEl = document.getElementById('earth-to-oram-birthday');
+            if (!bdayEl) {
+                bdayEl = document.createElement('div');
+                bdayEl.id = 'earth-to-oram-birthday';
+                resultEl.appendChild(bdayEl);
+            }
+            bdayEl.innerHTML = renderBirthdayMessage(birthdays);
+            resultEl.classList.add('visible');
+        });
+
+        // ── Oram → Earth converter ─────────────────────────────────────────
+        document.getElementById('oram-to-earth-btn').addEventListener('click', () => {
+            const tqNumber = parseInt(document.getElementById('oram-tq-select').value);
+            const day = parseInt(document.getElementById('oram-day-select').value);
+            const oramDOY = tritquarterToOramDayOfYear(tqNumber, day);
+            const earthDate = oramDayOfYearToEarthDate(oramDOY);
+            const tqData = cal.tritquarters.find(t => t.tq === tqNumber);
+            const special = getSpecialDay(tqNumber, day, cal.specialDays);
+            const emoji = cal.seasonEmoji[tqData?.tq_season] || '';
+            const birthdays = getBirthdayCharacters(tqNumber, day);
+            const resultEl = document.getElementById('oram-to-earth-result');
+
+            document.getElementById('oram-to-earth-date').textContent = formatEarthDate(earthDate);
+            document.getElementById('oram-to-earth-season').textContent = `${emoji} ${tqData?.tq_season || ''} on Oram`;
+            const specialEl = document.getElementById('oram-to-earth-special');
+            if (special) {
+                specialEl.textContent = `✨ ${special.name} — ${special.desc}`;
+                specialEl.style.display = 'inline-block';
+            } else {
+                specialEl.style.display = 'none';
+            }
+            let bdayEl = document.getElementById('oram-to-earth-birthday');
+            if (!bdayEl) {
+                bdayEl = document.createElement('div');
+                bdayEl.id = 'oram-to-earth-birthday';
+                resultEl.appendChild(bdayEl);
+            }
+            bdayEl.innerHTML = renderBirthdayMessage(birthdays);
+            resultEl.classList.add('visible');
+        });
+
+    } catch (error) {
+        console.error("Error loading calendar:", error);
+        el.innerHTML = `
+            <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+            <h2>Error loading calendar!</h2>
+        `;
+        document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+    }
+}
 
 // =================================================================================
-// 5. Quiz Functions
+// 11. Personality Quiz
 // =================================================================================
 
 async function displayPersonalityQuiz() {
-    const characterDisplayArea = document.querySelector('.container');
-    if (!characterDisplayArea) {
-        console.error("'.container' element not found in HTML. Cannot display quiz.");
-        return;
-    }
-
-    characterDisplayArea.innerHTML = `<h2>Loading quiz questions...</h2>`;
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading quiz questions...</h2>`;
 
     try {
-        const snapshot = await db.collection('personalityQuestions').orderBy('quesOrder').get();
+        const snapshot = await db.collection('personality_questions').orderBy('ques_order').get();
         quizQuestions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         if (quizQuestions.length > 0) {
@@ -575,7 +865,7 @@ async function displayPersonalityQuiz() {
             userAnswers = {};
             renderQuestion();
         } else {
-            characterDisplayArea.innerHTML = `
+            el.innerHTML = `
                 <button class="back-button" id="back-to-quiz-home-btn">← Back to Home</button>
                 <h2>No quiz questions found!</h2>
             `;
@@ -583,7 +873,7 @@ async function displayPersonalityQuiz() {
         }
     } catch (error) {
         console.error("Error fetching quiz questions:", error);
-        characterDisplayArea.innerHTML = `
+        el.innerHTML = `
             <button class="back-button" id="back-to-quiz-home-btn">← Back to Home</button>
             <h2>Error loading quiz!</h2>
         `;
@@ -592,10 +882,11 @@ async function displayPersonalityQuiz() {
 }
 
 function renderQuestion() {
-    const characterDisplayArea = document.querySelector('.container');
-    if (!characterDisplayArea) return;
+    const el = getContainer();
+    if (!el) return;
 
-    characterDisplayArea.innerHTML = `
+    // FIX: Added flex-wrap and min-width 0 inline on buttons so Next doesn't overflow on mobile
+    el.innerHTML = `
         <button class="back-button" id="back-to-quiz-home-btn">← Back to Home</button>
         <div class="quiz-container">
             <p class="question-number">Question ${currentQuestionIndex + 1} of ${quizQuestions.length}</p>
@@ -611,84 +902,69 @@ function renderQuestion() {
     document.getElementById('back-to-quiz-home-btn').addEventListener('click', displayHomeScreen);
 
     const questionData = quizQuestions[currentQuestionIndex];
-    const questionTextElement = characterDisplayArea.querySelector('.quiz-question-text');
-    const quizAnswersDiv = characterDisplayArea.querySelector('.quiz-answers');
-    const nextButton = characterDisplayArea.querySelector('#next-question-btn');
-    const prevButton = characterDisplayArea.querySelector('#prev-question-btn');
+    const questionTextEl  = el.querySelector('.quiz-question-text');
+    const quizAnswersDiv  = el.querySelector('.quiz-answers');
+    const nextButton      = el.querySelector('#next-question-btn');
+    const prevButton      = el.querySelector('#prev-question-btn');
 
-    questionTextElement.textContent = questionData.question;
+    questionTextEl.textContent = questionData.question;
 
-    if (questionData.type === 'multiple-choice') {
-        questionData.answers.forEach((answer) => {
-            const answerButton = document.createElement('button');
-            answerButton.classList.add('quiz-answer-button');
-            answerButton.textContent = answer;
-            answerButton.dataset.answer = answer;
+    // ques_type field (was "type" in old schema)
+    if (questionData.ques_type === 'multiple-choice') {
+        // answers is an array of {index: "text"} objects
+        questionData.answers.forEach(answerObj => {
+            const answerText = Object.values(answerObj)[0];
+            const btn = document.createElement('button');
+            btn.classList.add('quiz-answer-button');
+            btn.textContent = answerText;
+            btn.dataset.answer = answerText;
 
-            if (userAnswers[questionData.id] === answer) {
-                answerButton.classList.add('selected');
-            }
+            if (userAnswers[questionData.id] === answerText) btn.classList.add('selected');
 
-            answerButton.addEventListener('click', () => {
-                quizAnswersDiv.querySelectorAll('.quiz-answer-button').forEach(btn => {
-                    btn.classList.remove('selected');
-                });
-                answerButton.classList.add('selected');
-                userAnswers[questionData.id] = answer;
+            btn.addEventListener('click', () => {
+                quizAnswersDiv.querySelectorAll('.quiz-answer-button').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                userAnswers[questionData.id] = answerText;
             });
-            quizAnswersDiv.appendChild(answerButton);
+            quizAnswersDiv.appendChild(btn);
         });
-    } else if (questionData.type === 'short-answer') {
+    } else if (questionData.ques_type === 'short-answer') {
         const textarea = document.createElement('textarea');
         textarea.classList.add('quiz-short-answer-input');
-        textarea.placeholder = "Type your answer here...";
+        textarea.placeholder = 'Type your answer here...';
         textarea.id = `question-${questionData.id}`;
-        textarea.name = `answer-${questionData.id}`;
         textarea.maxLength = 100;
 
-        if (userAnswers[questionData.id]) {
-            textarea.value = userAnswers[questionData.id];
-        }
-        textarea.addEventListener('input', () => {
-            userAnswers[questionData.id] = textarea.value;
-        });
+        if (userAnswers[questionData.id]) textarea.value = userAnswers[questionData.id];
 
-        // Enter key triggers Next/Submit instead of inserting a newline
-        textarea.addEventListener('keydown', (e) => {
+        textarea.addEventListener('input', () => { userAnswers[questionData.id] = textarea.value; });
+        textarea.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                const nextBtn = document.getElementById('next-question-btn');
-                if (nextBtn) nextBtn.click();
+                const nb = document.getElementById('next-question-btn');
+                if (nb) nb.click();
             }
         });
-
         quizAnswersDiv.appendChild(textarea);
-
-        // Autofocus so the user can start typing immediately
         setTimeout(() => textarea.focus(), 0);
     }
 
     prevButton.disabled = currentQuestionIndex === 0;
     prevButton.addEventListener('click', () => {
-        if (currentQuestionIndex > 0) {
-            currentQuestionIndex--;
-            renderQuestion();
-        }
+        if (currentQuestionIndex > 0) { currentQuestionIndex--; renderQuestion(); }
     });
 
     if (currentQuestionIndex === quizQuestions.length - 1) {
         nextButton.textContent = 'Submit Quiz';
-        nextButton.addEventListener('click', () => {
-            handleSubmitQuiz();
-        });
+        nextButton.addEventListener('click', handleSubmitQuiz);
     } else {
         nextButton.textContent = 'Next Question';
         nextButton.addEventListener('click', () => {
-            if (questionData.type === 'multiple-choice' && !userAnswers[questionData.id]) {
+            if (questionData.ques_type === 'multiple-choice' && !userAnswers[questionData.id]) {
                 alert('Please select an answer before proceeding.');
                 return;
             }
-            if (questionData.type === 'short-answer' && (!userAnswers[questionData.id] || userAnswers[questionData.id].trim() === '')) {
+            if (questionData.ques_type === 'short-answer' && (!userAnswers[questionData.id] || !userAnswers[questionData.id].trim())) {
                 alert('Please enter an answer before proceeding.');
                 return;
             }
@@ -698,22 +974,19 @@ function renderQuestion() {
     }
 }
 
-
 function handleSubmitQuiz() {
-    const lastQuestion = quizQuestions[quizQuestions.length - 1];
-    if (lastQuestion.type === 'multiple-choice' && !userAnswers[lastQuestion.id]) {
+    const lastQ = quizQuestions[quizQuestions.length - 1];
+    if (lastQ.ques_type === 'multiple-choice' && !userAnswers[lastQ.id]) {
         alert('Please select an answer for the last question.');
         return;
     }
-    if (lastQuestion.type === 'short-answer' && (!userAnswers[lastQuestion.id] || userAnswers[lastQuestion.id].trim() === '')) {
+    if (lastQ.ques_type === 'short-answer' && (!userAnswers[lastQ.id] || !userAnswers[lastQ.id].trim())) {
         alert('Please enter an answer for the last question.');
         return;
     }
 
-    console.log("Client-side userAnswers before sending to Cloud Function:", userAnswers);
-
-    const characterDisplayArea = document.querySelector('.container');
-    characterDisplayArea.innerHTML = `
+    const el = getContainer();
+    el.innerHTML = `
         <div class="quiz-results-loading">
             <h2>Processing your personality...</h2>
             <p>Consulting the stars of Airdaeya...</p>
@@ -725,48 +998,53 @@ function handleSubmitQuiz() {
 
     processQuiz({ answers: userAnswers })
         .then(async (result) => {
-            const geminiMatch = result.data.matchResult;
+            const geminiMatch          = result.data.matchResult;
             const matchedCharacterName = result.data.matchedCharacterName;
-            console.log("Gemini says:", geminiMatch);
-            console.log("Matched character:", matchedCharacterName);
+            const matchedGoesBy        = result.data.matchedGoesBy || null;
+            const matchedAliases       = result.data.matchedAliases || [];
 
-            const portraitURL = result.data.matchedPortraitURL || null;
-            const matchedGoesBy = result.data.matchedGoesBy || null;
-            const matchedAliases = result.data.matchedAliases || [];
-            console.log("Portrait URL from function:", portraitURL);
+            // Resolve portrait: Cloud Function may return a full URL, a storage path, or nothing.
+            // If it's not already an https:// URL, treat it as a storage path and resolve it.
+            // Fall back to the placeholder hooded traveler if nothing is found.
+            const rawPortrait = result.data.matchedPortraitURL || result.data.matchedPortraitPath || null;
+            let portraitURL = null;
+            if (rawPortrait && rawPortrait.startsWith('https://')) {
+                portraitURL = rawPortrait;
+            } else {
+                const path = resolvePortraitPath(rawPortrait || 'placeholder_hooded_traveler.png');
+                portraitURL = await getStorageURL(path).catch(() => null);
+                // If character has no portrait, always fall back to the hooded traveler placeholder
+                if (!portraitURL) {
+                    portraitURL = await getStorageURL('Characters/placeholder_hooded_traveler.png').catch(() => null);
+                }
+            }
 
             const nameHTML = matchedCharacterName
                 ? `<div class="match-character-name">${matchedCharacterName}</div>`
                 : '';
-
             const goesByHTML = matchedGoesBy && matchedGoesBy !== matchedCharacterName
                 ? `<div class="match-goes-by">Goes by: <em>${matchedGoesBy}</em></div>`
                 : '';
-
-            const aliasesHTML = matchedAliases && matchedAliases.length > 0
+            const aliasesHTML = matchedAliases.length > 0
                 ? `<div class="match-aliases">Also known as: <em>${matchedAliases.join(', ')}</em></div>`
                 : '';
 
-            const portraitHTML = portraitURL
-                ? `<div class="match-portrait-container">
-                       ${nameHTML}
-                       <img src="${portraitURL}" alt="Character portrait" class="match-portrait" />
-                       ${goesByHTML}
-                       ${aliasesHTML}
-                   </div>`
-                : `${nameHTML}${goesByHTML}${aliasesHTML}`;
+            const portraitHTML = `<div class="match-portrait-container">
+                ${nameHTML}
+                <img src="${portraitURL || PLACEHOLDER_IMG_LARGE}" alt="Character portrait" class="match-portrait" />
+                ${goesByHTML}${aliasesHTML}
+            </div>`;
 
-            // Extract the dramatic proclamation line for the share image
             const lines = geminiMatch.split('\n').filter(l => l.trim());
             let proclamation = '';
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('YOUR AIRDAEYA MATCH') && lines[i+2]) {
-                    proclamation = lines[i+2].replace(/[*_]/g, '').trim();
+                if (lines[i].includes('YOUR AIRDAEYA MATCH') && lines[i + 2]) {
+                    proclamation = lines[i + 2].replace(/[*_]/g, '').trim();
                     break;
                 }
             }
 
-            characterDisplayArea.innerHTML = `
+            el.innerHTML = `
                 <button class="back-button" id="back-to-home-btn">← Back to Home</button>
                 <div class="quiz-results">
                     <h1>Your Airdaeya Personality Match!</h1>
@@ -774,37 +1052,28 @@ function handleSubmitQuiz() {
                     <div class="gemini-response-content" id="quiz-result-text">
                         ${geminiMatch
                             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                            .replace(/\*(.+?)\*/g,   '<em>$1</em>')
                             .replace(/\n/g, '<br>')}
                     </div>
                     <div class="download-buttons">
-                        <button class="download-btn pdf-btn" id="download-pdf-btn">📄 Save as PDF</button>
+                        <button class="download-btn pdf-btn"   id="download-pdf-btn">📄 Save as PDF</button>
                         <button class="download-btn share-btn" id="share-image-btn">📸 Share as Image</button>
                     </div>
                 </div>
             `;
             document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
-
-            // PDF download
-            document.getElementById('download-pdf-btn').addEventListener('click', () => {
-                generatePDF(matchedCharacterName, matchedGoesBy, geminiMatch, portraitURL);
-            });
-
-            // Share image download
-            document.getElementById('share-image-btn').addEventListener('click', () => {
-                generateShareImage(matchedCharacterName, matchedGoesBy, proclamation, portraitURL);
-            });
-
+            document.getElementById('download-pdf-btn').addEventListener('click', () =>
+                generatePDF(matchedCharacterName, matchedGoesBy, geminiMatch, portraitURL));
+            document.getElementById('share-image-btn').addEventListener('click', () =>
+                generateShareImage(matchedCharacterName, matchedGoesBy, proclamation, portraitURL));
         })
-        .catch((error) => {
+        .catch(error => {
             console.error("Error calling Cloud Function:", error);
-            const errorMessage = `Failed to get your personality match. Error: ${error.message}`;
-
-            characterDisplayArea.innerHTML = `
+            el.innerHTML = `
                 <button class="back-button" id="back-to-home-btn">← Back to Home</button>
                 <div class="quiz-results error-message">
                     <h1>Oops! Something went wrong.</h1>
-                    <p>${errorMessage}</p>
+                    <p>Failed to get your personality match. Error: ${error.message}</p>
                     <p>Please try again later.</p>
                 </div>
             `;
@@ -812,18 +1081,18 @@ function handleSubmitQuiz() {
         });
 }
 
-
 // =================================================================================
-// 6. Download Functions
+// 12. Download Functions (PDF & Share Image)
 // =================================================================================
 
+// FIX: Logo loading now uses getStorageURL() with paths in the Logos folder
+//      instead of hardcoded expiring token URLs
 async function generatePDF(characterName, goesBy, responseText, portraitURL) {
     const btn = document.getElementById('download-pdf-btn');
     btn.textContent = 'Generating PDF...';
     btn.disabled = true;
 
     try {
-        // Load jsPDF dynamically
         if (!window.jspdf) {
             await new Promise((resolve, reject) => {
                 const script = document.createElement('script');
@@ -840,15 +1109,11 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         const margin = 20;
         const contentW = pageW - margin * 2;
 
-        // Background
-        doc.setFillColor(245, 240, 225); // --bg-color light
+        doc.setFillColor(245, 240, 225);
         doc.rect(0, 0, pageW, doc.internal.pageSize.getHeight(), 'F');
-
-        // Header bar
-        doc.setFillColor(69, 35, 69); // --primary-color
+        doc.setFillColor(69, 35, 69);
         doc.rect(0, 0, pageW, 28, 'F');
 
-        // Title
         doc.setTextColor(255, 215, 0);
         doc.setFontSize(20);
         doc.setFont('helvetica', 'bold');
@@ -857,20 +1122,25 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         doc.setFont('helvetica', 'normal');
         doc.text('Your Airdaeya Personality Match', pageW / 2, 22, { align: 'center' });
 
-        // Airdaeium icon in header
+        // FIX: Load Airdaeium icon via getStorageURL (Logos folder)
         try {
-            const iconImg = new Image();
-            iconImg.crossOrigin = 'Anonymous';
-            await new Promise((res, rej) => { iconImg.onload = res; iconImg.onerror = rej; iconImg.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d'; });
-            const iconC = document.createElement('canvas');
-            iconC.width = iconImg.width; iconC.height = iconImg.height;
-            iconC.getContext('2d').drawImage(iconImg, 0, 0);
-            doc.addImage(iconC.toDataURL('image/png'), 'PNG', 12, 4, 20, 20);
-        } catch(e) { console.warn('Icon load failed', e); }
+            const iconURL = await getLogoURL('icon');
+            if (iconURL) {
+                const iconImg = new Image();
+                iconImg.crossOrigin = 'Anonymous';
+                await new Promise((res, rej) => {
+                    iconImg.onload = res; iconImg.onerror = rej;
+                    iconImg.src = iconURL;
+                });
+                const iconC = document.createElement('canvas');
+                iconC.width = iconImg.width; iconC.height = iconImg.height;
+                iconC.getContext('2d').drawImage(iconImg, 0, 0);
+                doc.addImage(iconC.toDataURL('image/png'), 'PNG', 12, 4, 20, 20);
+            }
+        } catch (e) { console.warn('Icon load failed', e); }
 
         let y = 38;
 
-        // Portrait — square with rounded corners and gold border
         if (portraitURL) {
             try {
                 const img = new Image();
@@ -882,17 +1152,15 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
                 const imgData = imgC.toDataURL('image/jpeg', 0.85);
                 const imgSize = 55;
                 const imgX = (pageW - imgSize) / 2;
-                const r = 3; // border radius
-                // Gold border (rounded rect)
+                const r = 3;
                 doc.setDrawColor(255, 215, 0);
                 doc.setLineWidth(1.2);
                 doc.roundedRect(imgX - 1, y - 1, imgSize + 2, imgSize + 2, r, r, 'S');
                 doc.addImage(imgData, 'JPEG', imgX, y, imgSize, imgSize, undefined, undefined, undefined, [r, r, r, r]);
                 y += imgSize + 8;
-            } catch(e) { console.warn('Portrait failed', e); y += 5; }
+            } catch (e) { console.warn('Portrait failed', e); y += 5; }
         }
 
-        // Character name
         doc.setTextColor(69, 35, 69);
         doc.setFontSize(17);
         doc.setFont('helvetica', 'bold');
@@ -907,13 +1175,11 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
             y += 9;
         } else { y += 3; }
 
-        // Divider
         doc.setDrawColor(69, 35, 69);
         doc.setLineWidth(0.5);
         doc.line(margin, y, pageW - margin, y);
         y += 7;
 
-        // Response text — strip emojis, replace section headers
         const sectionHeaders = ['YOUR AIRDAEYA MATCH', 'WHY YOU ARE KINDRED SPIRITS', 'YOUR UNIQUE SPARK', 'A TASTE OF AIRDAEYA'];
         let cleanText = responseText
             .replace(/\*\*(.+?)\*\*/g, '$1')
@@ -945,27 +1211,36 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
                 y = 20;
             }
             doc.text(lines, margin, y);
-            y += lines.length * 5 + (isHeader ? 2 : 2);
+            y += lines.length * 5 + 2;
         }
 
-        // Footer with KT Pike logo
         const pageH_pdf = doc.internal.pageSize.getHeight();
         const footerY = pageH_pdf - 16;
         doc.setDrawColor(195, 177, 133);
         doc.setLineWidth(0.3);
         doc.line(margin, footerY - 4, pageW - margin, footerY - 4);
+
+        // FIX: Load KTPike black logo via getStorageURL (Logos folder)
         try {
-            const logoImg = new Image();
-            logoImg.crossOrigin = 'Anonymous';
-            await new Promise((res, rej) => { logoImg.onload = res; logoImg.onerror = rej; logoImg.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20black%20extended%20logo%20.png?alt=media&token=e1917ce9-2000-4290-9c8f-02d82bbaeb51'; });
-            const logoC = document.createElement('canvas');
-            logoC.width = logoImg.width; logoC.height = logoImg.height;
-            logoC.getContext('2d').drawImage(logoImg, 0, 0);
-            const logoAspect = logoImg.width / logoImg.height;
-            const logoH_pdf = 8;
-            const logoW_pdf = logoH_pdf * logoAspect;
-            doc.addImage(logoC.toDataURL('image/png'), 'PNG', (pageW - logoW_pdf) / 2, footerY - 2, logoW_pdf, logoH_pdf);
-        } catch(e) {
+            const logoURL = await getLogoURL('ktpike-black');
+            if (logoURL) {
+                const logoImg = new Image();
+                logoImg.crossOrigin = 'Anonymous';
+                await new Promise((res, rej) => {
+                    logoImg.onload = res; logoImg.onerror = rej;
+                    logoImg.src = logoURL;
+                });
+                const logoC = document.createElement('canvas');
+                logoC.width = logoImg.width; logoC.height = logoImg.height;
+                logoC.getContext('2d').drawImage(logoImg, 0, 0);
+                const logoAspect = logoImg.width / logoImg.height;
+                const logoH_pdf = 8;
+                const logoW_pdf = logoH_pdf * logoAspect;
+                doc.addImage(logoC.toDataURL('image/png'), 'PNG', (pageW - logoW_pdf) / 2, footerY - 2, logoW_pdf, logoH_pdf);
+            } else {
+                throw new Error('No logo URL');
+            }
+        } catch (e) {
             doc.setFontSize(8);
             doc.setFont('helvetica', 'italic');
             doc.setTextColor(143, 97, 144);
@@ -976,10 +1251,9 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         doc.setTextColor(143, 97, 144);
         doc.text('airdaeya.web.app', pageW / 2, footerY + 8, { align: 'center' });
 
-        const filename = `Airdaeium-${(goesBy || characterName || 'Match').replace(/\s+/g, '-')}.pdf`;
-        doc.save(filename);
+        doc.save(`Airdaeium-${(goesBy || characterName || 'Match').replace(/\s+/g, '-')}.pdf`);
 
-    } catch(e) {
+    } catch (e) {
         console.error('PDF generation failed:', e);
         alert('Could not generate PDF. Please try again.');
     } finally {
@@ -999,56 +1273,50 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         canvas.width = W; canvas.height = H;
         const ctx = canvas.getContext('2d');
 
-        // Background gradient
         const bg = ctx.createLinearGradient(0, 0, 0, H);
         bg.addColorStop(0, '#2d2e49');
         bg.addColorStop(1, '#452345');
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
 
-        // Subtle texture overlay
         ctx.fillStyle = 'rgba(195, 177, 133, 0.04)';
-        for (let i = 0; i < H; i += 4) {
-            ctx.fillRect(0, i, W, 2);
-        }
+        for (let i = 0; i < H; i += 4) ctx.fillRect(0, i, W, 2);
 
-        // Gold decorative top/bottom bars
         const goldGrad = ctx.createLinearGradient(0, 0, W, 0);
-        goldGrad.addColorStop(0, '#B8860B');
-        goldGrad.addColorStop(0.3, '#FFD700');
-        goldGrad.addColorStop(0.5, '#DAA520');
-        goldGrad.addColorStop(0.7, '#FFD700');
+        goldGrad.addColorStop(0, '#B8860B'); goldGrad.addColorStop(0.3, '#FFD700');
+        goldGrad.addColorStop(0.5, '#DAA520'); goldGrad.addColorStop(0.7, '#FFD700');
         goldGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = goldGrad;
         ctx.fillRect(0, 18, W, 12);
         ctx.fillRect(0, H - 30, W, 12);
 
-        // Airdaeium icon top-left
+        // FIX: Load Airdaeium icon via getStorageURL (Logos folder)
         try {
-            const icon = new Image();
-            icon.crossOrigin = 'Anonymous';
-            await new Promise((res, rej) => { icon.onload = res; icon.onerror = rej; icon.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Airdaeium%20Icon.png?alt=media&token=f0f192e2-90ce-4dee-8eea-053a70fb130d'; });
-            ctx.drawImage(icon, 30, 38, 80, 80);
-        } catch(e) { console.warn('Icon failed', e); }
+            const iconURL = await getLogoURL('icon');
+            if (iconURL) {
+                const icon = new Image();
+                icon.crossOrigin = 'Anonymous';
+                await new Promise((res, rej) => {
+                    icon.onload = res; icon.onerror = rej;
+                    icon.src = iconURL;
+                });
+                ctx.drawImage(icon, 30, 38, 80, 80);
+            }
+        } catch (e) { console.warn('Icon failed', e); }
 
-        // App title
         ctx.textAlign = 'center';
-        const titleGrad = ctx.createLinearGradient(W*0.2, 0, W*0.8, 0);
-        titleGrad.addColorStop(0, '#B8860B');
-        titleGrad.addColorStop(0.5, '#FFD700');
+        const titleGrad = ctx.createLinearGradient(W * 0.2, 0, W * 0.8, 0);
+        titleGrad.addColorStop(0, '#B8860B'); titleGrad.addColorStop(0.5, '#FFD700');
         titleGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = titleGrad;
         ctx.font = 'bold 72px Georgia, serif';
-        ctx.fillText('Airdaeium', W/2, 100);
+        ctx.fillText('Airdaeium', W / 2, 100);
 
         ctx.fillStyle = 'rgba(255,215,0,0.6)';
         ctx.font = 'italic 36px Georgia, serif';
-        ctx.fillText('My Airdaeya Personality Match', W/2, 146);
+        ctx.fillText('My Airdaeya Personality Match', W / 2, 146);
 
-        // Portrait circle — bigger
-        const centerX = W/2, portraitY = 403, radius = 210;
-
-        // Glow effect
+        const centerX = W / 2, portraitY = 403, radius = 210;
         const glow = ctx.createRadialGradient(centerX, portraitY, radius * 0.7, centerX, portraitY, radius * 1.5);
         glow.addColorStop(0, 'rgba(255,215,0,0.25)');
         glow.addColorStop(1, 'rgba(255,215,0,0)');
@@ -1068,13 +1336,11 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
                 ctx.clip();
                 ctx.drawImage(img, centerX - radius, portraitY - radius, radius * 2, radius * 2);
                 ctx.restore();
-            } catch(e) { console.warn('Portrait load failed', e); }
+            } catch (e) { console.warn('Portrait load failed', e); }
         }
 
-        // Gold circle border
         const borderGrad = ctx.createLinearGradient(centerX - radius, 0, centerX + radius, 0);
-        borderGrad.addColorStop(0, '#B8860B');
-        borderGrad.addColorStop(0.5, '#FFD700');
+        borderGrad.addColorStop(0, '#B8860B'); borderGrad.addColorStop(0.5, '#FFD700');
         borderGrad.addColorStop(1, '#B8860B');
         ctx.strokeStyle = borderGrad;
         ctx.lineWidth = 9;
@@ -1082,13 +1348,10 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
         ctx.arc(centerX, portraitY, radius, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Character name — bigger
         const displayName = (goesBy || characterName || '').toUpperCase();
-        const nameGrad = ctx.createLinearGradient(W*0.1, 0, W*0.9, 0);
-        nameGrad.addColorStop(0, '#B8860B');
-        nameGrad.addColorStop(0.3, '#FFD700');
-        nameGrad.addColorStop(0.5, '#DAA520');
-        nameGrad.addColorStop(0.7, '#FFD700');
+        const nameGrad = ctx.createLinearGradient(W * 0.1, 0, W * 0.9, 0);
+        nameGrad.addColorStop(0, '#B8860B'); nameGrad.addColorStop(0.3, '#FFD700');
+        nameGrad.addColorStop(0.5, '#DAA520'); nameGrad.addColorStop(0.7, '#FFD700');
         nameGrad.addColorStop(1, '#B8860B');
         ctx.fillStyle = nameGrad;
         ctx.shadowColor = 'rgba(0,0,0,0.6)';
@@ -1100,10 +1363,9 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
             nameFontSize -= 2;
             ctx.font = `bold ${nameFontSize}px Georgia, serif`;
         }
-        ctx.fillText(displayName, W/2, 718);
+        ctx.fillText(displayName, W / 2, 718);
         ctx.shadowBlur = 0;
 
-        // Proclamation — word wrap, bigger font
         if (proclamation) {
             ctx.fillStyle = 'rgba(195,177,133,0.92)';
             ctx.font = 'italic 42px Georgia, serif';
@@ -1119,47 +1381,48 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
                 } else { currentLine = test; }
             }
             if (currentLine) procLines.push(currentLine);
-            const lineHeight = 54;
             let procY = 782;
-            for (const pl of procLines) {
-                ctx.fillText(pl, W/2, procY);
-                procY += lineHeight;
-            }
+            for (const pl of procLines) { ctx.fillText(pl, W / 2, procY); procY += 54; }
         }
 
-        // Decorative divider
         ctx.strokeStyle = 'rgba(255,215,0,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(W*0.15, 918); ctx.lineTo(W*0.85, 918);
+        ctx.moveTo(W * 0.15, 918); ctx.lineTo(W * 0.85, 918);
         ctx.stroke();
 
-        // KT Pike logo
+        // FIX: Load KTPike white logo via getStorageURL (Logos folder)
         try {
-            const logo = new Image();
-            logo.crossOrigin = 'Anonymous';
-            await new Promise((res, rej) => { logo.onload = res; logo.onerror = rej; logo.src = 'https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/KTPike%20white%20extended%20logo%20.png?alt=media&token=d8c93eba-8ce8-48c9-bb7a-ac4127ee6775'; });
-            const logoH = 85;
-            const logoW = logo.width * (logoH / logo.height);
-            ctx.drawImage(logo, (W - logoW) / 2, 928, logoW, logoH);
-        } catch(e) {
+            const logoURL = await getLogoURL('ktpike-white');
+            if (logoURL) {
+                const logo = new Image();
+                logo.crossOrigin = 'Anonymous';
+                await new Promise((res, rej) => {
+                    logo.onload = res; logo.onerror = rej;
+                    logo.src = logoURL;
+                });
+                const logoH = 85;
+                const logoW2 = logo.width * (logoH / logo.height);
+                ctx.drawImage(logo, (W - logoW2) / 2, 928, logoW2, logoH);
+            } else {
+                throw new Error('No logo URL');
+            }
+        } catch (e) {
             ctx.fillStyle = 'rgba(255,215,0,0.7)';
             ctx.font = '28px Georgia, serif';
-            ctx.fillText('K.T. Pike', W/2, 944);
+            ctx.fillText('K.T. Pike', W / 2, 944);
         }
 
-        // Website
         ctx.fillStyle = 'rgba(195,177,133,0.65)';
         ctx.font = '30px Arial, sans-serif';
-        ctx.fillText('Find your match at airdaeya.web.app', W/2, 1032);
+        ctx.fillText('Find your match at airdaeya.web.app', W / 2, 1032);
 
-        // Download
         const link = document.createElement('a');
         link.download = `Airdaeium-${(goesBy || characterName || 'Match').replace(/\s+/g, '-')}.png`;
         link.href = canvas.toDataURL('image/png');
         link.click();
 
-    } catch(e) {
+    } catch (e) {
         console.error('Image generation failed:', e);
         alert('Could not generate image. Please try again.');
     } finally {
@@ -1169,20 +1432,21 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
 }
 
 // =================================================================================
-// 6. DOMContentLoaded Listener
+// 13. DOMContentLoaded
 // =================================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeTheme();
+
     const themeToggleButton = document.getElementById('theme-toggle');
     if (themeToggleButton) {
         themeToggleButton.addEventListener('click', () => {
-            const isCurrentlyDarkMode = document.body.classList.contains('dark-mode');
-            applyTheme(!isCurrentlyDarkMode);
+            applyTheme(!document.body.classList.contains('dark-mode'));
         });
     }
 
-    // Make the Airdaeium logo clickable — return to home from anywhere
+    // FIX: Logo click → home. Checks both id and common class names in case HTML differs.
+    // Make sure your HTML element has id="airdaeium-logo" on the logo image or wrapper.
     const logoEl = document.getElementById('airdaeium-logo');
     if (logoEl) {
         logoEl.style.cursor = 'pointer';
@@ -1191,258 +1455,3 @@ document.addEventListener('DOMContentLoaded', () => {
 
     displayHomeScreen();
 });
-
-// =================================================================================
-// 7. Oram Calendar Converter
-// =================================================================================
-
-const ORAM_CALENDAR = {
-    tritquarters: [
-        { name: 'Mamdi',    number: 1,  season: 'Spring' },
-        { name: 'Netamee',  number: 2,  season: 'Spring' },
-        { name: 'Elany',    number: 3,  season: 'Spring' },
-        { name: 'Bamdi',    number: 4,  season: 'Summer' },
-        { name: 'Kazamee',  number: 5,  season: 'Summer' },
-        { name: 'Ojany',    number: 6,  season: 'Summer' },
-        { name: 'Zamdi',    number: 7,  season: 'Autumn' },
-        { name: 'Pilamee',  number: 8,  season: 'Autumn' },
-        { name: 'Itrany',   number: 9,  season: 'Autumn' },
-        { name: 'Samdi',    number: 10, season: 'Winter' },
-        { name: 'Tihamee',  number: 11, season: 'Winter' },
-        { name: 'Anany',    number: 12, season: 'Winter' },
-    ],
-    daysPerTritquarter: 33,
-    daysPerYear: 396,
-    seasonEmoji: { Spring: '🌱', Summer: '☀️', Autumn: '🍂', Winter: '❄️' },
-    specialDays: [
-        { tq: 1,  day: 1,  name: 'Spring Equinox',        desc: 'The first day of the Oram year, when spring begins.' },
-        { tq: 2,  day: 22, name: 'Proximus',               desc: 'The Day of Sharing — one of two days Oram is closest to its sun.' },
-        { tq: 4,  day: 1,  name: 'Summer Solstice',        desc: 'The longest day of the year on Oram.' },
-        { tq: 5,  day: 17, name: 'Midsummer',              desc: 'A celebration at the heart of summer.' },
-        { tq: 7,  day: 1,  name: 'Autumnal Equinox',       desc: 'The first day of autumn on Oram.' },
-        { tq: 8,  day: 11, name: 'Proximan',               desc: 'The Harvest Festival — the second day Oram is closest to its sun.' },
-        { tq: 8,  day: 15, name: 'Mordkanee',              desc: 'A sacred night when the veil between this world and the spirit world is at its thinnest.' },
-        { tq: 10, day: 1,  name: 'The Longest Night',      desc: 'The Winter Solstice — the darkest night of the Oram year.' },
-        { tq: 11, day: 17, name: 'Hearthsglow',            desc: 'Midwinter celebration — a time of warmth, light, and gathering.' },
-    ]
-};
-
-// Anchor: July 30 (Earth) = Kazamee 13 (Oram)
-// Kazamee is tritquarter 5, so Oram day-of-year = (4 * 33) + 13 = 145
-const ANCHOR_EARTH = new Date(2024, 2, 20); // March 20, 2024 = Mamdi 1 = Oram day 1
-const ANCHOR_ORAM_DAY = 1; // March 20 = Mamdi 1 = day 1 of Oram year
-
-// Oram year is 396 days, Earth year is 365.25 days
-const ORAM_DAYS_PER_EARTH_DAY = 144 / 132; // Derived from calibration: March 20 = Mamdi 1, July 30 = Kazamee 13
-
-function earthDateToOramDayOfYear(earthDate) {
-    // Use March 20 of the SAME year as anchor — this handles leap years automatically
-    // because Feb 29 always falls before March 20 and never affects the relative count
-    const march20 = new Date(earthDate.getFullYear(), 2, 20); // March 20, same year
-    const earthDaysDiff = (earthDate - march20) / (1000 * 60 * 60 * 24);
-    const raw = 1 + earthDaysDiff * ORAM_DAYS_PER_EARTH_DAY;
-    let oramDayOfYear = Math.round(raw);
-    // Wrap to 1-396
-    oramDayOfYear = ((oramDayOfYear - 1) % 396 + 396) % 396 + 1;
-    return oramDayOfYear;
-}
-
-function oramDayOfYearToTritquarter(dayOfYear) {
-    const tqIndex = Math.floor((dayOfYear - 1) / 33);
-    const day = ((dayOfYear - 1) % 33) + 1;
-    return { tq: ORAM_CALENDAR.tritquarters[tqIndex], day };
-}
-
-function tritquarterToOramDayOfYear(tqNumber, day) {
-    return ((tqNumber - 1) * 33) + day;
-}
-
-function oramDayOfYearToEarthDayOfYear(oramDayOfYear) {
-    // Use reverse lookup: find the Earth date that converts forward to this Oram day
-    const year = new Date().getFullYear();
-    const march20 = new Date(year, 2, 20);
-    const estDays = Math.round((oramDayOfYear - 1) / ORAM_DAYS_PER_EARTH_DAY);
-
-    // Search window around the estimate
-    for (let offset = -5; offset <= 5; offset++) {
-        const candidate = new Date(march20);
-        candidate.setDate(march20.getDate() + estDays + offset);
-        if (earthDateToOramDayOfYear(candidate) === oramDayOfYear) {
-            return candidate;
-        }
-    }
-    // Fallback
-    const fallback = new Date(march20);
-    fallback.setDate(march20.getDate() + estDays);
-    return fallback;
-}
-
-function getSpecialDay(tqNumber, day) {
-    return ORAM_CALENDAR.specialDays.find(s => s.tq === tqNumber && s.day === day) || null;
-}
-
-function formatOramDate(tq, day) {
-    return `${tq.name} ${day}`;
-}
-
-function formatEarthDate(date) {
-    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-}
-
-function buildOramResult(oramDayOfYear) {
-    const { tq, day } = oramDayOfYearToTritquarter(oramDayOfYear);
-    const special = getSpecialDay(tq.number, day);
-    const seasonEmoji = ORAM_CALENDAR.seasonEmoji[tq.season];
-    return { tq, day, special, seasonEmoji };
-}
-
-function displayOramCalendar() {
-    const characterDisplayArea = document.querySelector('.container');
-    if (!characterDisplayArea) return;
-
-    // Build tritquarter options for selector
-    const tqOptions = ORAM_CALENDAR.tritquarters.map(tq =>
-        `<option value="${tq.number}">${tq.name} (Tritquarter ${tq.number})</option>`
-    ).join('');
-
-    // Build day options
-    const dayOptions = Array.from({ length: 33 }, (_, i) =>
-        `<option value="${i + 1}">${i + 1}</option>`
-    ).join('');
-
-    characterDisplayArea.innerHTML = `
-        <button class="back-button" id="back-to-home-btn">← Back to Home</button>
-        <div class="calendar-container">
-            <h1>Oram Calendar</h1>
-            <p class="welcome-subtitle">Convert dates between Earth and the world of Oram</p>
-
-            <!-- Today Panel -->
-            <div class="calendar-today-panel" id="today-panel"></div>
-
-            <!-- Converters -->
-            <div class="calendar-converters">
-
-                <!-- Earth to Oram -->
-                <div class="converter-panel">
-                    <h3>🌍 Earth → Oram</h3>
-                    <label for="earth-date-input">Enter an Earth Date</label>
-                    <input type="date" id="earth-date-input" />
-                    <button class="convert-btn" id="earth-to-oram-btn">Convert</button>
-                    <div class="converter-result" id="earth-to-oram-result">
-                        <div class="result-date" id="earth-to-oram-date"></div>
-                        <div class="result-season" id="earth-to-oram-season"></div>
-                        <div class="result-special" id="earth-to-oram-special" style="display:none"></div>
-                    </div>
-                </div>
-
-                <!-- Oram to Earth -->
-                <div class="converter-panel">
-                    <h3>🪐 Oram → Earth</h3>
-                    <label>Select an Oram Date</label>
-                    <div class="oram-day-select">
-                        <div>
-                            <label for="oram-tq-select">Tritquarter</label>
-                            <select id="oram-tq-select">${tqOptions}</select>
-                        </div>
-                        <div>
-                            <label for="oram-day-select">Day</label>
-                            <select id="oram-day-select">${dayOptions}</select>
-                        </div>
-                    </div>
-                    <button class="convert-btn" id="oram-to-earth-btn">Convert</button>
-                    <div class="converter-result" id="oram-to-earth-result">
-                        <div class="result-date" id="oram-to-earth-date"></div>
-                        <div class="result-season" id="oram-to-earth-season"></div>
-                        <div class="result-special" id="oram-to-earth-special" style="display:none"></div>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-    `;
-
-    document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
-
-    // Load birthdays then populate today panel
-    loadCharacterBirthdays().then(() => {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const oramDayOfYear = earthDateToOramDayOfYear(today);
-        const { tq, day, special, seasonEmoji } = buildOramResult(oramDayOfYear);
-        const birthdays = getBirthdayCharacters(tq.number, day);
-        const todayPanel = document.getElementById('today-panel');
-        if (todayPanel) {
-            todayPanel.innerHTML = `
-                <div class="today-label">Today on Earth</div>
-                <div class="today-earth">${formatEarthDate(today)}</div>
-                <div class="today-divider">⟡</div>
-                <div class="today-label">Today on Oram</div>
-                <div class="today-oram">${formatOramDate(tq, day)}</div>
-                <div class="today-season">${seasonEmoji} ${tq.season} on Oram</div>
-                ${special ? `<div class="today-special">✨ ${special.name} — ${special.desc}</div>` : ''}
-                ${renderBirthdayMessage(birthdays)}
-            `;
-        }
-    });
-
-    // Earth to Oram converter
-    document.getElementById('earth-to-oram-btn').addEventListener('click', () => {
-        const input = document.getElementById('earth-date-input').value;
-        if (!input) { alert('Please select an Earth date.'); return; }
-        const parts = input.split('-').map(Number);
-        const earthDate = new Date(parts[0], parts[1] - 1, parts[2]);
-        const oramDay = earthDateToOramDayOfYear(earthDate);
-        const { tq, day: oDay, special, seasonEmoji } = buildOramResult(oramDay);
-        const birthdays = getBirthdayCharacters(tq.number, oDay);
-        const resultEl = document.getElementById('earth-to-oram-result');
-        document.getElementById('earth-to-oram-date').textContent = formatOramDate(tq, oDay);
-        document.getElementById('earth-to-oram-season').textContent = `${seasonEmoji} ${tq.season} on Oram`;
-        const specialEl = document.getElementById('earth-to-oram-special');
-        if (special) {
-            specialEl.textContent = `✨ ${special.name} — ${special.desc}`;
-            specialEl.style.display = 'inline-block';
-        } else {
-            specialEl.style.display = 'none';
-        }
-        // Birthday message
-        let bdayEl = document.getElementById('earth-to-oram-birthday');
-        if (!bdayEl) {
-            bdayEl = document.createElement('div');
-            bdayEl.id = 'earth-to-oram-birthday';
-            resultEl.appendChild(bdayEl);
-        }
-        bdayEl.innerHTML = renderBirthdayMessage(birthdays);
-        resultEl.classList.add('visible');
-    });
-
-    // Oram to Earth converter
-    document.getElementById('oram-to-earth-btn').addEventListener('click', () => {
-        const tqNumber = parseInt(document.getElementById('oram-tq-select').value);
-        const oDay = parseInt(document.getElementById('oram-day-select').value);
-        const oramDayOfYear = tritquarterToOramDayOfYear(tqNumber, oDay);
-        const earthDate = oramDayOfYearToEarthDayOfYear(oramDayOfYear);
-        const tq = ORAM_CALENDAR.tritquarters[tqNumber - 1];
-        const special = getSpecialDay(tqNumber, oDay);
-        const seasonEmoji = ORAM_CALENDAR.seasonEmoji[tq.season];
-        const birthdays = getBirthdayCharacters(tqNumber, oDay);
-        const resultEl = document.getElementById('oram-to-earth-result');
-        document.getElementById('oram-to-earth-date').textContent = formatEarthDate(earthDate);
-        document.getElementById('oram-to-earth-season').textContent = `${seasonEmoji} ${tq.season} on Oram`;
-        const specialEl = document.getElementById('oram-to-earth-special');
-        if (special) {
-            specialEl.textContent = `✨ ${special.name} — ${special.desc}`;
-            specialEl.style.display = 'inline-block';
-        } else {
-            specialEl.style.display = 'none';
-        }
-        // Birthday message
-        let bdayEl = document.getElementById('oram-to-earth-birthday');
-        if (!bdayEl) {
-            bdayEl = document.createElement('div');
-            bdayEl.id = 'oram-to-earth-birthday';
-            resultEl.appendChild(bdayEl);
-        }
-        bdayEl.innerHTML = renderBirthdayMessage(birthdays);
-        resultEl.classList.add('visible');
-    });
-}

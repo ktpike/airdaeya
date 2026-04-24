@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "aetherium-c34f7"
-  }
+    "default": "airdaeya"
+  },
+  "targets": {},
+  "etags": {}
 }
