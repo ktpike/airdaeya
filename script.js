@@ -543,7 +543,16 @@ async function displayCharacterDetails(characterId) {
     el.innerHTML = `<h2>Loading character details...</h2>`;
 
     try {
-        const doc = await db.collection('characters').doc(characterId).get();
+        // Fetch everything in parallel — including both sides of relationships
+        const [doc, appearancesSnap, booksSnap, allCharsSnap, calData, relsAsPerson1Snap, relsAsPerson2Snap] = await Promise.all([
+            db.collection('characters').doc(characterId).get(),
+            db.collection('appearances').where('character_id', '==', characterId).get(),
+            db.collection('books').get(),
+            db.collection('characters').get(),
+            loadCalendarData().catch(() => null),
+            db.collection('relationships').where('person1_id', '==', characterId).get(),
+            db.collection('relationships').where('person2_id', '==', characterId).get(),
+        ]);
 
         if (!doc.exists) {
             el.innerHTML = `
@@ -556,23 +565,234 @@ async function displayCharacterDetails(characterId) {
 
         const data = doc.data();
 
+        // ── Build lookup maps ───────────────────────────────────────────────
+        const bookMap = {};
+        booksSnap.forEach(d => { bookMap[d.id] = { id: d.id, ...d.data() }; });
+
+        const characterMap = {};
+        allCharsSnap.forEach(d => { characterMap[d.id] = { id: d.id, ...d.data() }; });
+
+        // ── Collect visible book appearances (non-cloaked) ──────────────────
+        function isBookVisible(book) {
+            if (!book) return false;
+            if (book.released === true) return true;
+            if (book.release_note && book.release_note.trim()) return true;
+            if (book.release_date) { const d = new Date(book.release_date); return !isNaN(d.getTime()); }
+            return false;
+        }
+
+        const bookAppearances = [];
+        appearancesSnap.forEach(d => {
+            const { book_id, role } = d.data();
+            if (role === 'cloaked') return;
+            const book = bookMap[book_id];
+            if (book && isBookVisible(book)) bookAppearances.push({ book, role });
+        });
+        bookAppearances.sort((a, b) => (a.book.book_order || 0) - (b.book.book_order || 0));
+
+        // ── Format birthday ─────────────────────────────────────────────────
+        let birthdayText = null;
+        const birthYear = data.birthday && data.birthday.year ? parseInt(data.birthday.year) : null;
+        if (data.birthday && data.birthday.tritquarter && data.birthday.day && calData) {
+            const tqNum = parseInt(data.birthday.tritquarter);
+            const day   = parseInt(data.birthday.day);
+            const tq    = calData.tritquarters.find(t => t.tq === tqNum);
+            if (tq) {
+                birthdayText = `${tq.tq_name} ${day}`;
+                if (birthYear) birthdayText += `, Year ${birthYear.toLocaleString()}`;
+                const special = calData.specialDays.find(s => s.tq === tqNum && s.day === day);
+                if (special) birthdayText += ` — ${special.name}`;
+            }
+        } else if (data.birthday && data.birthday.tritquarter && data.birthday.day) {
+            birthdayText = `Tritquarter ${data.birthday.tritquarter}, Day ${data.birthday.day}`;
+            if (birthYear) birthdayText += `, Year ${birthYear.toLocaleString()}`;
+        }
+
+        // ── Calculate age at story start for each book ──────────────────────
+        function calcAgeAtStoryStart(book) {
+            if (!birthYear || !book.story_start) return null;
+            const storyYear = parseInt(book.story_start.year ?? book.story_start);
+            if (isNaN(storyYear)) return null;
+            return storyYear - birthYear;
+        }
+
+        // ── Inverse relationship type map ───────────────────────────────────
+        // When this character is person2, r_type describes person1→person2,
+        // so we show the inverse label for person2's perspective.
+        const INVERSE_TYPE = {
+            'boyfriend':        'girlfriend',
+            'girlfriend':       'boyfriend',
+            'ex-boyfriend':     'ex-girlfriend',
+            'ex-girlfriend':    'ex-boyfriend',
+            'husband':          'wife',
+            'wife':             'husband',
+            'ex-husband':       'ex-wife',
+            'ex-wife':          'ex-husband',
+            'partner':          'partner',
+            'ex-partner':       'ex-partner',
+            'father':           'child',
+            'mother':           'child',
+            'parent':           'child',
+            'child':            'parent',
+            'son':              'parent',
+            'daughter':         'parent',
+            'brother':          'sibling',
+            'sister':           'sibling',
+            'sibling':          'sibling',
+            'half-brother':     'half-sibling',
+            'half-sister':      'half-sibling',
+            'half-sibling':     'half-sibling',
+            'stepfather':       'stepchild',
+            'stepmother':       'stepchild',
+            'stepson':          'stepparent',
+            'stepdaughter':     'stepparent',
+            'stepchild':        'stepparent',
+            'stepparent':       'stepchild',
+            'grandfather':      'grandchild',
+            'grandmother':      'grandchild',
+            'grandparent':      'grandchild',
+            'grandson':         'grandparent',
+            'granddaughter':    'grandparent',
+            'grandchild':       'grandparent',
+            'uncle':            'niece/nephew',
+            'aunt':             'niece/nephew',
+            'nephew':           'aunt/uncle',
+            'niece':            'aunt/uncle',
+            'cousin':           'cousin',
+            'friend':           'friend',
+            'best friend':      'best friend',
+            'enemy':            'enemy',
+            'rival':            'rival',
+            'mentor':           'mentee',
+            'mentee':           'mentor',
+            'teacher':          'student',
+            'student':          'teacher',
+            'ally':             'ally',
+            'colleague':        'colleague',
+        };
+
+        function inverseType(rType) {
+            const lower = (rType || '').toLowerCase();
+            return INVERSE_TYPE[lower] || rType; // fall back to original if no mapping
+        }
+
+        // ── Collect relationships ───────────────────────────────────────────
+        // As person1: r_type is from our perspective, other person is person2
+        // As person2: r_type describes person1→us, so we show the inverse
+        const relationships = [];
+        relsAsPerson1Snap.forEach(d => {
+            const rel = d.data();
+            const other = characterMap[rel.person2_id];
+            if (other) relationships.push({ charId: rel.person2_id, char: other, rType: rel.r_type });
+        });
+        relsAsPerson2Snap.forEach(d => {
+            const rel = d.data();
+            const other = characterMap[rel.person1_id];
+            if (other) relationships.push({ charId: rel.person1_id, char: other, rType: inverseType(rel.r_type) });
+        });
+        // Sort by relationship type then name
+        relationships.sort((a, b) => a.rType.localeCompare(b.rType) || (a.char.goes_by || a.char.name).localeCompare(b.char.goes_by || b.char.name));
+
+        // ── Resolve parent names from parent_ids ────────────────────────────
+        const parentEntries = [];
+        if (data.parent_ids && data.parent_ids.length) {
+            data.parent_ids.forEach(pid => {
+                const parent = characterMap[pid];
+                parentEntries.push({ charId: pid, char: parent || null });
+            });
+        }
+
+        // ── html-safe helper ────────────────────────────────────────────────
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Clickable character name helper ─────────────────────────────────
+        function charLink(charId, charData) {
+            const label = charData ? escHtml(charData.goes_by || charData.name) : escHtml(charId);
+            return `<button class="char-name-link" data-char-id="${escHtml(charId)}">${label}</button>`;
+        }
+
+        // ── Build info-box rows ─────────────────────────────────────────────
+        const infoRows = [];
+
+        if (data.pronouns) {
+            infoRows.push({ label: 'Pronouns', html: escHtml(data.pronouns) });
+        }
+        if (data.aliases && data.aliases.length) {
+            const goesBy = (data.goes_by || '').trim().toLowerCase();
+            const list = (Array.isArray(data.aliases) ? data.aliases : [data.aliases])
+                .filter(a => a.trim().toLowerCase() !== goesBy);
+            if (list.length) {
+                infoRows.push({ label: 'Aliases', html: list.map(escHtml).join(', ') });
+            }
+        }
+        if (data.species) {
+            infoRows.push({ label: 'Species', html: escHtml(data.species) });
+        }
+        if (birthdayText) {
+            infoRows.push({ label: 'Birthday', html: escHtml(birthdayText) });
+        }
+        if (parentEntries.length) {
+            const html = parentEntries.map(({ charId, char }) => charLink(charId, char)).join(', ');
+            infoRows.push({ label: parentEntries.length === 1 ? 'Parent' : 'Parents', html });
+        }
+        if (relationships.length) {
+            // Group by r_type for display
+            const grouped = {};
+            relationships.forEach(({ charId, char, rType }) => {
+                if (!grouped[rType]) grouped[rType] = [];
+                grouped[rType].push({ charId, char });
+            });
+            const html = Object.entries(grouped).map(([rType, people]) => {
+                const names = people.map(({ charId, char }) => charLink(charId, char)).join(', ');
+                return `<span class="relationship-group"><span class="relationship-type-label">${escHtml(rType)}:</span> ${names}</span>`;
+            }).join('');
+            infoRows.push({ label: 'Relationships', html });
+        }
+        if (bookAppearances.length) {
+            const bookItems = bookAppearances.map(({ book, role }) => {
+                const title = escHtml(book.book_title || book.title || 'Untitled');
+                const age = calcAgeAtStoryStart(book);
+                const ageNote = age !== null ? `<span class="book-age-note"> (age&nbsp;${age})</span>` : '';
+                const roleNote = role === 'POV' ? ' <span class="book-role-note">POV</span>' : '';
+                const linked = book.book_url
+                    ? `<a href="${book.book_url}" target="_blank" rel="noopener" class="info-book-link">${title}</a>`
+                    : title;
+                return `<span class="book-appearance-item">${linked}${roleNote}${ageNote}</span>`;
+            });
+            infoRows.push({ label: 'Appears In', html: bookItems.join('') });
+        }
+
+        // ── Build the name header ───────────────────────────────────────────
+        const prefix = data.c_prefix ? `<span class="character-name-prefix">${escHtml(data.c_prefix)}</span> ` : '';
+        const suffix = data.c_suffix ? `<div class="character-name-suffix">${escHtml(data.c_suffix)}</div>` : '';
+        const goesBy = (data.goes_by && data.goes_by !== data.name)
+            ? `<div class="character-name-goesby">"${escHtml(data.goes_by)}"</div>` : '';
+        const titlesHtml = (data.c_titles && data.c_titles.length)
+            ? (Array.isArray(data.c_titles) ? data.c_titles : [data.c_titles])
+                .map(t => `<div class="character-name-title">${escHtml(t)}</div>`).join('') : '';
+
+        // ── Render page ─────────────────────────────────────────────────────
         el.innerHTML = `
             <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
-            <h1 class="character-detail-name">${data.name}</h1>
+            <div class="character-detail-name-block">
+                <h1 class="character-detail-name">${prefix}${escHtml(data.name)}</h1>
+                ${suffix}${goesBy}${titlesHtml}
+            </div>
             <div class="character-detail-content"></div>
+            <p class="character-detail-description"></p>
         `;
         document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
 
+        // ── Portrait ────────────────────────────────────────────────────────
         const wrapper = el.querySelector('.character-detail-content');
-
         const img = document.createElement('img');
         img.alt = `Portrait of ${data.name}`;
         img.classList.add('character-portrait-detail');
-        // FIX: Use inline data URI placeholder
         img.src = PLACEHOLDER_IMG_LARGE;
         wrapper.appendChild(img);
 
-        // Load portrait (prefer drakkaen_portrait if present)
         console.log("Character data fields:", Object.keys(data), "portrait:", data.portrait);
         const portraitPath = resolvePortraitPath(data.drakkaen_portrait || data.portrait);
         if (portraitPath) {
@@ -584,9 +804,32 @@ async function displayCharacterDetails(characterId) {
             getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => { if (ph) img.src = ph; });
         }
 
-        const desc = document.createElement('p');
+        // ── Info box ────────────────────────────────────────────────────────
+        if (infoRows.length > 0) {
+            const infoBox = document.createElement('div');
+            infoBox.classList.add('character-info-box');
+            infoBox.innerHTML = `
+                <div class="character-info-box-header">Character Details</div>
+                <dl class="character-info-list">
+                    ${infoRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            wrapper.appendChild(infoBox);
+        }
+
+        // ── Wire up all char-name-link buttons (parents, relationships, etc.) 
+        el.querySelectorAll('.char-name-link').forEach(btn => {
+            btn.addEventListener('click', () => displayCharacterDetails(btn.dataset.charId));
+        });
+
+        // ── Description ─────────────────────────────────────────────────────
+        const desc = el.querySelector('.character-detail-description');
         desc.textContent = data.description || 'No description available.';
-        wrapper.appendChild(desc);
 
     } catch (error) {
         console.error("Error fetching character details:", error);
