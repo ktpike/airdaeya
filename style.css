@@ -290,17 +290,33 @@ body {
 /* --- Styles for Detail Content Layout (Image left, Description right) --- */
 .character-detail-content {
     display: flex;
-    flex-direction: row; /* Image and text side-by-side */
-    gap: 30px; /* Space between image and text */
-    align-items: flex-start; /* Align content to the top */
+    flex-direction: row; /* Left col (portrait + info) and description side-by-side */
+    gap: 30px;
+    align-items: flex-start;
     margin-top: 20px;
-    flex-wrap: wrap; /* Allow wrapping on smaller screens */
 }
 
-.character-detail-content .character-portrait-detail {
-    flex-shrink: 0; /* Prevent image from shrinking */
-    margin: 0; /* Remove auto margins when in flex context */
-    align-self: flex-start; /* Align just the image to the start */
+/* Left column: portrait stacked above info box */
+.character-detail-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 300px; /* matches portrait max-width */
+    gap: 16px;
+    /* let the info box determine height naturally — no overflow clipping */
+    height: auto;
+    overflow: visible;
+}
+
+.character-detail-left .character-portrait-detail {
+    width: 100%;
+    margin: 0;
+}
+
+/* Info box fills the left column width */
+.character-detail-left .character-info-box {
+    width: 100%;
 }
 
 /* Description is now rendered below the portrait row, not inside it */
@@ -371,11 +387,84 @@ body {
 
 /* --- Character Detail Description (below portrait row) --- */
 .character-detail-description {
-    margin-top: 24px;
+    flex: 1;
+    min-width: 0; /* prevent flex overflow */
     font-family: var(--font-serif);
     font-size: 1.05em;
     line-height: 1.7;
     color: var(--text-color);
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* --- Family Box (siblings, children) in right column --- */
+.character-family-box {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    border: 1px solid rgba(69,35,69,0.2);
+    order: 1; /* renders after description prose */
+}
+
+.dark-mode .character-family-box {
+    border-color: rgba(255,215,0,0.2);
+}
+
+.character-family-box-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    color: #FFD700;
+    font-family: var(--font-display);
+    font-size: 0.85em;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,215,0,0.25);
+}
+
+/* "with [Partner]" / "via [Parent]" context lines inside family rows */
+.family-with-partner,
+.family-via-parent {
+    font-family: var(--font-header);
+    font-size: 0.88em;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 1px;
+}
+
+.dark-mode .family-with-partner,
+.dark-mode .family-via-parent {
+    color: rgba(195,177,133,0.65);
+}
+
+/* Death year note after a name in the Family box: "(d. 14,811)" */
+.family-death-note {
+    font-family: var(--font-serif);
+    font-size: 0.82em;
+    font-style: italic;
+    color: var(--text-secondary);
+    opacity: 0.8;
+}
+
+.dark-mode .family-death-note {
+    color: rgba(195,177,133,0.55);
+}
+
+/* Birth/death year span on sibling names: "(b. 14,856)" or "(14,856–14,867)" */
+.family-life-dates {
+    font-family: var(--font-serif);
+    font-size: 0.82em;
+    font-style: italic;
+    color: var(--text-secondary);
+    opacity: 0.75;
+}
+
+.dark-mode .family-life-dates {
+    color: rgba(195,177,133,0.55);
 }
 
 /* --- Clickable character name buttons (in info box) --- */
@@ -485,13 +574,11 @@ body {
 
 /* --- Character Info Box (sits beside portrait) --- */
 .character-info-box {
-    flex: 1 1 220px;          /* grows to fill space, min ~220px */
-    min-width: 200px;
+    width: 100%;
     border-radius: 12px;
-    overflow: hidden;
+    overflow: hidden;         /* clips child corners to border-radius */
     box-shadow: 0 2px 10px rgba(0,0,0,0.18);
     border: 1px solid rgba(69,35,69,0.2);
-    align-self: flex-start;
 }
 
 .dark-mode .character-info-box {
@@ -553,17 +640,21 @@ body {
     line-height: 1.4;
 }
 
-/* Narrow screens: portrait stacks above info box */
+/* Narrow screens: portrait → info box → description */
 @media (max-width: 600px) {
     .character-detail-content {
         flex-direction: column;
         align-items: center;
     }
-    .character-info-box {
+    .character-detail-left {
+        width: 100%;
+        max-width: 300px;
+    }
+    .character-detail-description {
         width: 100%;
     }
-    .character-detail-content .character-portrait-detail {
-        max-width: 220px;
+    .character-family-box {
+        width: 100%;
     }
 }
 
@@ -598,17 +689,21 @@ body {
 }
 
 /* --- Home Screen Buttons --- */
-.home-buttons {
+.home-buttons-wrap {
     display: flex;
-    flex-direction: column; /* Stack buttons vertically */
-    gap: 15px; /* Space between buttons */
+    justify-content: center;
+}
+
+.home-buttons {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 15px;
     margin-top: 30px;
-    align-items: center; /* Center buttons horizontally */
 }
 
 .action-button {
     background-color: var(--primary-color);
-    color: var(--button-text-color-light-mode); /* <-- Use the new variable here */
+    color: var(--button-text-color-light-mode);
     padding: 15px 30px;
     border: none;
     border-radius: 8px;
@@ -617,9 +712,10 @@ body {
     font-family: var(--font-header);
     letter-spacing: 0.05em;
     transition: background-color 0.2s ease, transform 0.2s ease;
-    min-width: 250px;
+    width: 100%;
     text-align: center;
     text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .action-button:hover {

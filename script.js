@@ -186,11 +186,11 @@ function displayHomeScreen() {
     el.innerHTML = `
         <h1>Welcome to the Tales of Airdaeya compendium</h1>
         <p class="welcome-subtitle">Explore the vast lore of the Airdaeya universe!</p>
-        <div class="home-buttons">
+        <div class="home-buttons-wrap"><div class="home-buttons">
             <button id="view-characters-btn" class="action-button">Character List</button>
             <button id="view-calendar-btn"   class="action-button">Calendar Converter</button>
             <button id="start-quiz-btn"      class="action-button">Personality Quiz</button>
-        </div>
+        </div></div>
     `;
 
     document.getElementById('view-characters-btn').addEventListener('click', displayCharacterList);
@@ -429,7 +429,9 @@ async function displayCharacterList() {
                         ...povChars,
                         ...introChars.filter(c => c.role === 'primary')
                     ];
-                    const additionalChars = introChars.filter(c => c.role === 'secondary');
+                    const additionalChars = introChars.filter(c =>
+                        c.role === 'secondary' || c.role === 'tertiary' || c.role === 'mentioned'
+                    );
 
                     function appendRoleSection(label, charList) {
                         if (charList.length === 0) return;
@@ -523,9 +525,9 @@ function appendCharacterCard(container, charData, released = true) {
     nameEl.textContent = charData.name;
 
     const descEl = document.createElement('p');
-    descEl.textContent = charData.description
-        ? charData.description.substring(0, 150) + '...'
-        : 'No description available.';
+    const rawDesc = charData.description || 'No description available.';
+    const plainDesc = rawDesc.replace(/<[^>]*>/g, '');
+    descEl.textContent = plainDesc.length > 150 ? plainDesc.substring(0, 150) + '...' : plainDesc;
 
     text.appendChild(nameEl);
     text.appendChild(descEl);
@@ -544,7 +546,7 @@ async function displayCharacterDetails(characterId) {
 
     try {
         // Fetch everything in parallel — including both sides of relationships
-        const [doc, appearancesSnap, booksSnap, allCharsSnap, calData, relsAsPerson1Snap, relsAsPerson2Snap] = await Promise.all([
+        const [doc, appearancesSnap, booksSnap, allCharsSnap, calData, relsAsPerson1Snap, relsAsPerson2Snap, speciesSnap, subspeciesSnap] = await Promise.all([
             db.collection('characters').doc(characterId).get(),
             db.collection('appearances').where('character_id', '==', characterId).get(),
             db.collection('books').get(),
@@ -552,6 +554,8 @@ async function displayCharacterDetails(characterId) {
             loadCalendarData().catch(() => null),
             db.collection('relationships').where('person1_id', '==', characterId).get(),
             db.collection('relationships').where('person2_id', '==', characterId).get(),
+            db.collection('species').get(),
+            db.collection('subspecies').get(),
         ]);
 
         if (!doc.exists) {
@@ -571,6 +575,22 @@ async function displayCharacterDetails(characterId) {
 
         const characterMap = {};
         allCharsSnap.forEach(d => { characterMap[d.id] = { id: d.id, ...d.data() }; });
+
+        const speciesMap = {};
+        speciesSnap.forEach(d => { speciesMap[d.id] = { id: d.id, ...d.data() }; });
+
+        const subspeciesMap = {};
+        subspeciesSnap.forEach(d => {
+            const docData = d.data();
+            // Key by both the Firestore doc ID and the id field inside the doc
+            subspeciesMap[d.id] = { id: d.id, ...docData };
+            if (docData.id && docData.id !== d.id) {
+                subspeciesMap[docData.id] = { id: d.id, ...docData };
+            }
+        });
+        console.log('[Species] speciesMap keys:', Object.keys(speciesMap));
+        console.log('[Species] subspeciesMap keys:', Object.keys(subspeciesMap));
+        console.log('[Species] character species_id:', data.species_id);
 
         // ── Collect visible book appearances (non-cloaked) ──────────────────
         function isBookVisible(book) {
@@ -606,6 +626,56 @@ async function displayCharacterDetails(characterId) {
         } else if (data.birthday && data.birthday.tritquarter && data.birthday.day) {
             birthdayText = `Tritquarter ${data.birthday.tritquarter}, Day ${data.birthday.day}`;
             if (birthYear) birthdayText += `, Year ${birthYear.toLocaleString()}`;
+        }
+
+        // ── Spoiler-safe death date ──────────────────────────────────────────
+        // Convert an Oram calendar date object to a comparable absolute day number
+        function toAbsoluteDay(dateObj) {
+            if (!dateObj) return null;
+            const y  = parseInt(dateObj.year)          || 0;
+            const tq = parseInt(dateObj.tritquarter)   || 0;
+            const d  = parseInt(dateObj.day || dateObj.day_of_tritquarter) || 0;
+            return y * 396 + (tq - 1) * 33 + d;
+        }
+
+        // Find the earliest story_start among all visible books
+        let earliestStoryDay = null;
+        Object.values(bookMap).forEach(book => {
+            if (!isBookVisible(book) || !book.story_start) return;
+            const absDay = toAbsoluteDay(book.story_start);
+            if (absDay && (earliestStoryDay === null || absDay < earliestStoryDay)) {
+                earliestStoryDay = absDay;
+            }
+        });
+
+        // Returns true if a character's death should be hidden (on/after earliest book start)
+        function isSpoilerDeath(charData) {
+            if (!charData || !charData.death_date || !charData.death_date.year) return false;
+            if (earliestStoryDay === null) return false;
+            return toAbsoluteDay(charData.death_date) >= earliestStoryDay;
+        }
+
+        let deathText = null;
+        if (data.death_date && data.death_date.year) {
+            const deathAbsDay = toAbsoluteDay(data.death_date);
+            // Only reveal if the death happened strictly before the earliest book begins
+            if (earliestStoryDay === null || deathAbsDay < earliestStoryDay) {
+                const deathYear = parseInt(data.death_date.year);
+                if (data.death_date.tritquarter && data.death_date.day && calData) {
+                    const tqNum = parseInt(data.death_date.tritquarter);
+                    const day   = parseInt(data.death_date.day);
+                    const tq    = calData.tritquarters.find(t => t.tq === tqNum);
+                    if (tq) {
+                        deathText = `${tq.tq_name} ${day}, Year ${deathYear.toLocaleString()}`;
+                        const special = calData.specialDays.find(s => s.tq === tqNum && s.day === day);
+                        if (special) deathText += ` — ${special.name}`;
+                    } else {
+                        deathText = `Tritquarter ${tqNum}, Day ${day}, Year ${deathYear.toLocaleString()}`;
+                    }
+                } else {
+                    deathText = `Year ${deathYear.toLocaleString()}`;
+                }
+            }
         }
 
         // ── Calculate age at story start for each book ──────────────────────
@@ -683,12 +753,12 @@ async function displayCharacterDetails(characterId) {
         relsAsPerson1Snap.forEach(d => {
             const rel = d.data();
             const other = characterMap[rel.person2_id];
-            if (other) relationships.push({ charId: rel.person2_id, char: other, rType: rel.r_type });
+            if (other) relationships.push({ charId: rel.person2_id, char: other, rType: rel.r_type, startDate: rel.r_start_date || null, endDate: rel.r_end_date || null });
         });
         relsAsPerson2Snap.forEach(d => {
             const rel = d.data();
             const other = characterMap[rel.person1_id];
-            if (other) relationships.push({ charId: rel.person1_id, char: other, rType: inverseType(rel.r_type) });
+            if (other) relationships.push({ charId: rel.person1_id, char: other, rType: inverseType(rel.r_type), startDate: rel.r_start_date || null, endDate: rel.r_end_date || null });
         });
         // Sort by relationship type then name
         relationships.sort((a, b) => a.rType.localeCompare(b.rType) || (a.char.goes_by || a.char.name).localeCompare(b.char.goes_by || b.char.name));
@@ -702,6 +772,84 @@ async function displayCharacterDetails(characterId) {
             });
         }
 
+        // ── Derive family: children and siblings grouped by shared parent(s) ────────
+        const myParentIds = new Set(
+            (data.parent_ids || []).filter(pid => pid && pid.trim())
+        );
+
+        // Relationship records the current character is part of (both directions)
+        const allRels = [
+            ...relsAsPerson1Snap.docs.map(d => d.data()),
+            ...relsAsPerson2Snap.docs.map(d => d.data()),
+        ];
+
+        // Find a relationship record between any two character IDs (current char must be one)
+        function findRelBetween(idA, idB) {
+            return allRels.find(r =>
+                (r.person1_id === idA && r.person2_id === idB) ||
+                (r.person1_id === idB && r.person2_id === idA)
+            ) || null;
+        }
+
+        // Format date range the same way the Relationships info-row does
+        function formatRelDates(rel) {
+            if (!rel) return '';
+            const sy = rel.r_start_date && rel.r_start_date.year ? rel.r_start_date.year : null;
+            const ey = rel.r_end_date   && rel.r_end_date.year   ? rel.r_end_date.year   : null;
+            if (sy && ey && sy === ey) return ` <span class="rel-date">(${sy})</span>`;
+            if (sy && ey)             return ` <span class="rel-date">(${sy}–${ey})</span>`;
+            if (sy)                   return ` <span class="rel-date">(${sy}–)</span>`;
+            if (ey)                   return ` <span class="rel-date">(–${ey})</span>`;
+            return '';
+        }
+
+        const byName = (a, b) =>
+            (a.char.goes_by || a.char.name).localeCompare(b.char.goes_by || b.char.name);
+
+        // ── Children grouped by the set of other parent(s) ──────────────────────────
+        const childGroupMap = new Map();
+        Object.values(characterMap).forEach(other => {
+            if (other.id === characterId) return;
+            const theirParents = new Set((other.parent_ids || []).filter(pid => pid && pid.trim()));
+            if (!theirParents.has(characterId)) return;
+            const otherParentIds = [...theirParents].filter(pid => pid !== characterId).sort();
+            const key = otherParentIds.join('|') || '__none__';
+            if (!childGroupMap.has(key)) childGroupMap.set(key, { otherParentIds, children: [] });
+            childGroupMap.get(key).children.push({ charId: other.id, char: other });
+        });
+        const childGroups = [...childGroupMap.values()];
+        childGroups.forEach(g => g.children.sort(byName));
+        childGroups.sort((a, b) => {
+            const na = a.otherParentIds.map(pid => (characterMap[pid] || {}).goes_by || (characterMap[pid] || {}).name || pid).join(', ');
+            const nb = b.otherParentIds.map(pid => (characterMap[pid] || {}).goes_by || (characterMap[pid] || {}).name || pid).join(', ');
+            return na.localeCompare(nb);
+        });
+
+        // ── Siblings grouped by the shared parent(s) that connect them ────────────────
+        const sibGroupMap = new Map();
+        Object.values(characterMap).forEach(other => {
+            if (other.id === characterId) return;
+            const theirParents = new Set((other.parent_ids || []).filter(pid => pid && pid.trim()));
+            if (myParentIds.size === 0 || theirParents.size === 0) return;
+            const shared = [...myParentIds].filter(pid => theirParents.has(pid)).sort();
+            if (shared.length === 0) return;
+            const isFull = shared.length === myParentIds.size && shared.length === theirParents.size;
+            const key = shared.join('|');
+            if (!sibGroupMap.has(key)) sibGroupMap.set(key, { sharedParentIds: shared, full: isFull, members: [] });
+            sibGroupMap.get(key).members.push({ charId: other.id, char: other });
+        });
+        const siblingGroups = [...sibGroupMap.values()];
+        // Sort siblings oldest to youngest by birth year, then tq, then day
+        const byBirthDate = (a, b) => {
+            const ba = a.char.birthday || {}, bb = b.char.birthday || {};
+            const ya = parseInt(ba.year) || 0, yb = parseInt(bb.year) || 0;
+            if (ya !== yb) return ya - yb;
+            const ta = parseInt(ba.tritquarter) || 0, tb = parseInt(bb.tritquarter) || 0;
+            if (ta !== tb) return ta - tb;
+            return (parseInt(ba.day) || 0) - (parseInt(bb.day) || 0);
+        };
+        siblingGroups.forEach(g => g.members.sort(byBirthDate));
+
         // ── html-safe helper ────────────────────────────────────────────────
         function escHtml(str) {
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -711,6 +859,32 @@ async function displayCharacterDetails(characterId) {
         function charLink(charId, charData) {
             const label = charData ? escHtml(charData.goes_by || charData.name) : escHtml(charId);
             return `<button class="char-name-link" data-char-id="${escHtml(charId)}">${label}</button>`;
+        }
+
+        // charLink with optional (d. YEAR) death annotation for use in the Family box
+        function familyCharLink(charId, charData) {
+            const base = charLink(charId, charData);
+            if (charData && charData.death_date && charData.death_date.year && !isSpoilerDeath(charData)) {
+                return base + ` <span class="family-death-note">(d. ${charData.death_date.year.toLocaleString()})</span>`;
+            }
+            return base;
+        }
+
+        // Name + (b. YEAR) or (YEAR–YEAR) life dates span for family members
+        function familyLifeLink(charId, charData) {
+            const base = charLink(charId, charData);
+            const birthYear = charData && charData.birthday && charData.birthday.year
+                ? parseInt(charData.birthday.year) : null;
+            const showDeath = charData && charData.death_date && charData.death_date.year
+                && !isSpoilerDeath(charData);
+            const deathYear = showDeath ? parseInt(charData.death_date.year) : null;
+            let note = '';
+            if (birthYear && deathYear) {
+                note = ` <span class="family-life-dates">(b. ${birthYear.toLocaleString()} – d. ${deathYear.toLocaleString()})</span>`;
+            } else if (birthYear) {
+                note = ` <span class="family-life-dates">(b. ${birthYear.toLocaleString()})</span>`;
+            }
+            return base + note;
         }
 
         // ── Build info-box rows ─────────────────────────────────────────────
@@ -727,29 +901,32 @@ async function displayCharacterDetails(characterId) {
                 infoRows.push({ label: 'Aliases', html: list.map(escHtml).join(', ') });
             }
         }
-        if (data.species) {
-            infoRows.push({ label: 'Species', html: escHtml(data.species) });
+        if (data.species_id && data.species_id.length) {
+            const speciesLabels = data.species_id.map(sid => {
+                if (sid.startsWith('ss_')) {
+                    const ss = subspeciesMap[sid];
+                    console.log('[Species] lookup ss_id:', sid, '-> ss doc:', ss);
+                    if (!ss) return escHtml(sid);
+                    console.log('[Species] ss.species_id:', ss.species_id, '-> parent:', speciesMap[ss.species_id]);
+                    const parentSpecies = speciesMap[ss.species_id];
+                    const speciesName = parentSpecies ? escHtml(parentSpecies.s_name) : '';
+                    return speciesName
+                        ? escHtml(ss.ss_name) + ' (' + speciesName + ')'
+                        : escHtml(ss.ss_name);
+                } else {
+                    const sp = speciesMap[sid];
+                    return sp ? escHtml(sp.s_name) : escHtml(sid);
+                }
+            });
+            infoRows.push({ label: 'Species', html: speciesLabels.join(', ') });
         }
         if (birthdayText) {
             infoRows.push({ label: 'Birthday', html: escHtml(birthdayText) });
         }
-        if (parentEntries.length) {
-            const html = parentEntries.map(({ charId, char }) => charLink(charId, char)).join(', ');
-            infoRows.push({ label: parentEntries.length === 1 ? 'Parent' : 'Parents', html });
+        if (deathText) {
+            infoRows.push({ label: 'Death', html: escHtml(deathText) });
         }
-        if (relationships.length) {
-            // Group by r_type for display
-            const grouped = {};
-            relationships.forEach(({ charId, char, rType }) => {
-                if (!grouped[rType]) grouped[rType] = [];
-                grouped[rType].push({ charId, char });
-            });
-            const html = Object.entries(grouped).map(([rType, people]) => {
-                const names = people.map(({ charId, char }) => charLink(charId, char)).join(', ');
-                return `<span class="relationship-group"><span class="relationship-type-label">${escHtml(rType)}:</span> ${names}</span>`;
-            }).join('');
-            infoRows.push({ label: 'Relationships', html });
-        }
+        // Relationships moved to the Family & Relationships box
         if (bookAppearances.length) {
             const bookItems = bookAppearances.map(({ book, role }) => {
                 const title = escHtml(book.book_title || book.title || 'Untitled');
@@ -780,13 +957,15 @@ async function displayCharacterDetails(characterId) {
                 <h1 class="character-detail-name">${prefix}${escHtml(data.name)}</h1>
                 ${suffix}${goesBy}${titlesHtml}
             </div>
-            <div class="character-detail-content"></div>
-            <p class="character-detail-description"></p>
+            <div class="character-detail-content">
+                <div class="character-detail-left"></div>
+                <div class="character-detail-description"></div>
+            </div>
         `;
         document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
 
         // ── Portrait ────────────────────────────────────────────────────────
-        const wrapper = el.querySelector('.character-detail-content');
+        const wrapper = el.querySelector('.character-detail-left');
         const img = document.createElement('img');
         img.alt = `Portrait of ${data.name}`;
         img.classList.add('character-portrait-detail');
@@ -822,14 +1001,125 @@ async function displayCharacterDetails(characterId) {
             wrapper.appendChild(infoBox);
         }
 
+        // ── Description ─────────────────────────────────────────────────────
+        const desc = el.querySelector('.character-detail-description');
+
+        // ── Family box (parents, children by partner, siblings by shared parent) ──
+        const hasFamilyData = parentEntries.length || childGroups.length || siblingGroups.length || relationships.length;
+        if (hasFamilyData) {
+            const familyBox = document.createElement('div');
+            familyBox.classList.add('character-family-box');
+
+            const familyRows = [];
+
+            // ── Parents (first row) ──────────────────────────────────────────────────
+            if (parentEntries.length) {
+                const html = parentEntries
+                    .map(({ charId, char }) => familyLifeLink(charId, char))
+                    .join(', ');
+                familyRows.push({ label: parentEntries.length === 1 ? 'Parent' : 'Parents', html });
+            }
+
+            // ── Children: one row per co-parent group ────────────────────────────────
+            childGroups.forEach(({ otherParentIds, children }) => {
+                const childLinks = children
+                    .map(({ charId, char }) => familyLifeLink(charId, char))
+                    .join(', ');
+
+                if (otherParentIds.length === 0) {
+                    // No other known parent
+                    const label = children.length === 1 ? 'Child' : 'Children';
+                    familyRows.push({ label, html: childLinks });
+                } else {
+                    // Show "with [Partner]" as the label; partner name is a familyCharLink
+                    const partnerHtml = otherParentIds.map(pid => {
+                        const partnerChar = characterMap[pid];
+                        return charLink(pid, partnerChar || { name: pid });
+                    }).join(' & ');
+                    const label = children.length === 1 ? 'Child' : 'Children';
+                    familyRows.push({
+                        label,
+                        html: `<span class="family-with-partner">with ${partnerHtml}</span><br>${childLinks}`,
+                    });
+                }
+            });
+
+            // ── Siblings: one row per shared-parent group ────────────────────────────
+            siblingGroups.forEach(({ sharedParentIds, full, members }) => {
+                const memberLinks = members
+                    .map(({ charId, char }) => familyLifeLink(charId, char))
+                    .join(', ');
+                const label = full
+                    ? (members.length === 1 ? 'Sibling' : 'Siblings')
+                    : (members.length === 1 ? 'Half-Sibling' : 'Half-Siblings');
+
+                // Show the shared parent(s) as context — no death annotation on via line
+                const parentHtml = sharedParentIds.map(pid => {
+                    const parentChar = characterMap[pid];
+                    return charLink(pid, parentChar || { name: pid });
+                }).join(' & ');
+                const viaLabel = `<span class="family-via-parent">via ${parentHtml}</span>`;
+
+                familyRows.push({
+                    label,
+                    html: `${viaLabel}<br>${memberLinks}`,
+                });
+            });
+
+            // ── Relationships: one row per r_type group ──────────────────────────────
+            if (relationships.length) {
+                const grouped = {};
+                relationships.forEach(({ charId, char, rType, startDate, endDate }) => {
+                    if (!grouped[rType]) grouped[rType] = [];
+                    grouped[rType].push({ charId, char, startDate, endDate });
+                });
+                Object.entries(grouped).forEach(([rType, people]) => {
+                    const names = people.map(({ charId, char, startDate, endDate }) => {
+                        const startYear = startDate && startDate.year ? startDate.year : null;
+                        const otherDeathYear = char && !isSpoilerDeath(char) && char.death_date && char.death_date.year
+                            ? char.death_date.year : null;
+                        const selfDeathYear = data.death_date && data.death_date.year && !isSpoilerDeath(data)
+                            ? data.death_date.year : null;
+                        const explicitEndYear = endDate && endDate.year ? endDate.year : null;
+                        const endYear = explicitEndYear || otherDeathYear || selfDeathYear;
+                        let dateNote = '';
+                        if (startYear && endYear && startYear === endYear) {
+                            dateNote = ` <span class="rel-date">(${startYear})</span>`;
+                        } else if (startYear && endYear) {
+                            dateNote = ` <span class="rel-date">(${startYear}–${endYear})</span>`;
+                        } else if (startYear) {
+                            dateNote = ` <span class="rel-date">(${startYear}–)</span>`;
+                        } else if (endYear) {
+                            dateNote = ` <span class="rel-date">(–${endYear})</span>`;
+                        }
+                        return charLink(charId, char) + dateNote;
+                    }).join(', ');
+                    familyRows.push({ label: escHtml(rType), html: names });
+                });
+            }
+
+            familyBox.innerHTML = `
+                <div class="character-family-box-header">Family &amp; Relationships</div>
+                <dl class="character-info-list">
+                    ${familyRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            desc.appendChild(familyBox);
+        }
+
+        desc.insertAdjacentHTML('afterbegin', data.description || 'No description available.');
+
         // ── Wire up all char-name-link buttons (parents, relationships, etc.) 
         el.querySelectorAll('.char-name-link').forEach(btn => {
             btn.addEventListener('click', () => displayCharacterDetails(btn.dataset.charId));
         });
 
-        // ── Description ─────────────────────────────────────────────────────
-        const desc = el.querySelector('.character-detail-description');
-        desc.textContent = data.description || 'No description available.';
+        // ── Wire up char-name-links added after initial render ───────────────
 
     } catch (error) {
         console.error("Error fetching character details:", error);
