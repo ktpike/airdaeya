@@ -1393,6 +1393,184 @@ h1.character-detail-name {
     margin-top: 0;
 }
 
+/* =================================================================================
+   Character List — View Tabs (Profiles / A–Z Index)
+   ================================================================================= */
+
+.char-list-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 28px;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.char-list-tab {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-header);
+    font-size: 0.95em;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    /* Inactive tab: lavender / secondary color */
+    background-color: var(--secondary-color);
+    color: var(--quiz-nav-button-text-light-mode);
+}
+
+.char-list-tab:hover:not(.active) {
+    background-color: var(--primary-color);
+    color: var(--button-text-color-light-mode);
+}
+
+.char-list-tab.active {
+    /* Active tab: dark purple / primary color */
+    background-color: var(--primary-color);
+    color: var(--button-text-color-light-mode);
+    cursor: default;
+}
+
+.dark-mode .char-list-tab {
+    color: #c3b185;
+}
+
+.dark-mode .char-list-tab.active {
+    color: #FFD700;
+}
+
+/* =================================================================================
+   A–Z Index View
+   ================================================================================= */
+
+.char-index-jump-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: center;
+    margin-bottom: 24px;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.jump-bar-letter {
+    background: none;
+    border: 1px solid rgba(255,215,0,0.3);
+    border-radius: 4px;
+    color: rgba(255,215,0,0.75);
+    font-family: var(--font-header);
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    min-width: 30px;
+    text-align: center;
+}
+
+.jump-bar-letter:hover {
+    background-color: rgba(255,215,0,0.18);
+    color: #FFD700;
+    border-color: rgba(255,215,0,0.6);
+}
+
+.jump-bar-letter.disabled {
+    opacity: 0.28;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Letter section heading in the index */
+.char-index-letter-heading {
+    font-family: var(--font-display);
+    font-size: 1.6em;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--primary-color);
+    border-bottom: 2px solid rgba(69,35,69,0.3);
+    padding-bottom: 4px;
+    margin: 28px 0 10px 0;
+    scroll-margin-top: 80px; /* clears sticky header */
+}
+
+.dark-mode .char-index-letter-heading {
+    color: #FFD700;
+    border-bottom-color: rgba(255,215,0,0.35);
+}
+
+.char-index-letter-heading:first-child {
+    margin-top: 0;
+}
+
+/* Individual name row */
+.char-index-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 6px;
+    border-bottom: 1px solid rgba(69,35,69,0.08);
+    transition: background-color 0.15s ease;
+    border-radius: 4px;
+}
+
+.dark-mode .char-index-row {
+    border-bottom-color: rgba(255,215,0,0.08);
+}
+
+.char-index-row:hover {
+    background-color: rgba(69,35,69,0.06);
+}
+
+.dark-mode .char-index-row:hover {
+    background-color: rgba(255,215,0,0.06);
+}
+
+.char-index-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-header);
+    font-size: 1.05em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--primary-color);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: rgba(69,35,69,0.3);
+    transition: opacity 0.2s ease;
+    text-align: left;
+}
+
+.dark-mode .char-index-link {
+    color: #FFD700;
+    text-decoration-color: rgba(255,215,0,0.35);
+}
+
+.char-index-link:hover {
+    opacity: 0.7;
+}
+
+.char-index-full-name {
+    font-family: var(--font-serif);
+    font-size: 0.88em;
+    font-style: italic;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dark-mode .char-index-full-name {
+    color: rgba(195,177,133,0.65);
+}
+
 /* New Characters banner (book 2+) */
 .new-characters-banner {
     font-family: var(--font-header);

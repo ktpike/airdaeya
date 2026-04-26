@@ -96,14 +96,20 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.or
 const PLACEHOLDER_IMG_LARGE = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22200%22 height%3D%22200%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
 
 // =================================================================================
-// 3. Quiz Variables
+// 3. Character List Tab State
+// =================================================================================
+// Tracks which view tab is active: 'profiles' | 'index'
+let characterListTab = 'profiles';
+
+// =================================================================================
+// 4. Quiz Variables (was 3)
 // =================================================================================
 let quizQuestions = [];
 let currentQuestionIndex = 0;
 let userAnswers = {};
 
 // =================================================================================
-// 4. Character Birthday Cache
+// 5. Character Birthday Cache (was 4)
 // =================================================================================
 let characterBirthdays = null; // null = not yet loaded
 
@@ -335,132 +341,33 @@ async function displayCharacterList() {
         el.innerHTML = `
             <button class="back-button" id="back-to-home-btn">← Back to Home</button>
             <h1>Character List</h1>
-            <div class="character-list-structured"></div>
+            <div class="char-list-tabs">
+                <button class="char-list-tab ${characterListTab === 'profiles' ? 'active' : ''}" id="tab-profiles">Character Profiles</button>
+                <button class="char-list-tab ${characterListTab === 'index' ? 'active' : ''}" id="tab-index">A–Z Index</button>
+            </div>
+            <div id="char-list-view"></div>
         `;
         document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
 
-        const structuredList = el.querySelector('.character-list-structured');
+        // ── Tab switching ──────────────────────────────────────────────────
+        document.getElementById('tab-profiles').addEventListener('click', () => {
+            characterListTab = 'profiles';
+            document.getElementById('tab-profiles').classList.add('active');
+            document.getElementById('tab-index').classList.remove('active');
+            renderProfilesView(el, characterMap, worldMap, groupMap, bookMap, booksByGroup, groupsByWorld, bookCharacters, charFirstVisibleBookPerGroup, sortedWorlds, isBookVisible, isBookReleased, getReleaseLabel);
+        });
+        document.getElementById('tab-index').addEventListener('click', () => {
+            characterListTab = 'index';
+            document.getElementById('tab-index').classList.add('active');
+            document.getElementById('tab-profiles').classList.remove('active');
+            displayCharacterIndex(el, characterMap, charAppearances, bookMap, isBookVisible);
+        });
 
-        for (const world of sortedWorlds) {
-            const groups = groupsByWorld[world.id] || [];
-            if (groups.length === 0) continue;
-
-            const worldSection = document.createElement('div');
-            worldSection.classList.add('collection-section');
-
-            // World header — FIX: link whenever world_url is present
-            const worldHeader = document.createElement('h2');
-            worldHeader.classList.add('collection-header');
-            const worldURL = world.world_url || world.url || null;
-            worldHeader.innerHTML = worldURL
-                ? `<a href="${worldURL}" target="_blank" rel="noopener">${world.world_title || world.world_name}</a>`
-                : (world.world_title || world.world_name);
-            worldSection.appendChild(worldHeader);
-
-            for (const group of groups) {
-                const books = (booksByGroup[group.id] || []).filter(isBookVisible);
-                if (books.length === 0) continue;
-
-                const groupSection = document.createElement('div');
-                groupSection.classList.add('saga-section');
-
-                // Group header — FIX: link whenever group_url is present
-                const groupHeader = document.createElement('h3');
-                groupHeader.classList.add('saga-header');
-                const groupURL = group.group_url || group.url || null;
-                groupHeader.innerHTML = groupURL
-                    ? `<a href="${groupURL}" target="_blank" rel="noopener">${group.group_title}</a>`
-                    : group.group_title;
-                groupSection.appendChild(groupHeader);
-
-                books.forEach((book, bookIndex) => {
-                    const released = isBookReleased(book);
-                    const bookSection = document.createElement('div');
-                    bookSection.classList.add('book-section');
-
-                    // Book header — FIX: link whenever book_url is present (released OR not)
-                    const bookHeader = document.createElement('h4');
-                    bookHeader.classList.add('book-header');
-                    const bookTitle = book.book_title || 'Untitled';
-
-                    if (!released) {
-                        const label = getReleaseLabel(book);
-                        // FIX: Still link the title if a URL is available, even for unreleased books
-                        const titlePart = book.book_url
-                            ? `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`
-                            : bookTitle;
-                        bookHeader.innerHTML = `${titlePart} <span class="coming-soon-label">${label}</span>`;
-                    } else if (book.book_url) {
-                        bookHeader.innerHTML = `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`;
-                    } else {
-                        bookHeader.textContent = bookTitle;
-                    }
-                    bookSection.appendChild(bookHeader);
-
-                    // "New Characters!" banner for book 2+ in a group
-                    if (bookIndex > 0) {
-                        const newBanner = document.createElement('p');
-                        newBanner.classList.add('new-characters-banner');
-                        newBanner.textContent = '✨ New Characters!';
-                        bookSection.appendChild(newBanner);
-                    }
-
-                    // Characters for this book:
-                    // • POV characters appear on EVERY visible book in the group (readers always
-                    //   know whose viewpoint it is, even before the book releases).
-                    // • primary/secondary characters appear only on the first visible book where
-                    //   they are introduced (tracked via charFirstVisibleBookPerGroup).
-                    const bookChars = bookCharacters[book.id] || [];
-
-                    // Collect all POV chars that have an appearance record for this book
-                    const povChars = bookChars
-                        .filter(({ role }) => role === 'POV')
-                        .sort((a, b) => (characterMap[a.character_id]?.name || '').localeCompare(characterMap[b.character_id]?.name || ''));
-
-                    // Collect primary/secondary chars whose FIRST visible book in this group is this book
-                    const introChars = bookChars
-                        .filter(({ character_id, role }) => {
-                            if (role === 'cloaked' || role === 'POV') return false;
-                            return charFirstVisibleBookPerGroup[character_id]?.[group.id] === book.id;
-                        })
-                        .sort((a, b) => (characterMap[a.character_id]?.name || '').localeCompare(characterMap[b.character_id]?.name || ''));
-
-                    const mainChars = [
-                        ...povChars,
-                        ...introChars.filter(c => c.role === 'primary')
-                    ];
-                    const additionalChars = introChars.filter(c =>
-                        c.role === 'secondary' || c.role === 'tertiary' || c.role === 'mentioned'
-                    );
-
-                    function appendRoleSection(label, charList) {
-                        if (charList.length === 0) return;
-                        const section = document.createElement('div');
-                        section.classList.add('role-section');
-                        const roleLabel = document.createElement('p');
-                        roleLabel.classList.add('role-label');
-                        roleLabel.textContent = label;
-                        section.appendChild(roleLabel);
-                        const grid = document.createElement('div');
-                        grid.classList.add('character-list-grid');
-                        charList.forEach(({ character_id }) => {
-                            const charData = characterMap[character_id];
-                            if (charData) appendCharacterCard(grid, charData, released);
-                        });
-                        section.appendChild(grid);
-                        bookSection.appendChild(section);
-                    }
-
-                    appendRoleSection('Main Characters', mainChars);
-                    appendRoleSection('Additional Characters', additionalChars);
-
-                    groupSection.appendChild(bookSection);
-                });
-
-                worldSection.appendChild(groupSection);
-            }
-
-            structuredList.appendChild(worldSection);
+        // ── Initial render based on active tab ─────────────────────────────
+        if (characterListTab === 'index') {
+            displayCharacterIndex(el, characterMap, charAppearances, bookMap, isBookVisible);
+        } else {
+            renderProfilesView(el, characterMap, worldMap, groupMap, bookMap, booksByGroup, groupsByWorld, bookCharacters, charFirstVisibleBookPerGroup, sortedWorlds, isBookVisible, isBookReleased, getReleaseLabel);
         }
 
         console.log("Character list rendered.");
@@ -473,6 +380,224 @@ async function displayCharacterList() {
         `;
         document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
     }
+}
+
+// =================================================================================
+// 8b. Profiles View Renderer (extracted from displayCharacterList)
+// =================================================================================
+
+function renderProfilesView(el, characterMap, worldMap, groupMap, bookMap, booksByGroup, groupsByWorld, bookCharacters, charFirstVisibleBookPerGroup, sortedWorlds, isBookVisible, isBookReleased, getReleaseLabel) {
+    const viewEl = document.getElementById('char-list-view');
+    if (!viewEl) return;
+    viewEl.innerHTML = '';
+    const structuredList = document.createElement('div');
+    structuredList.classList.add('character-list-structured');
+    viewEl.appendChild(structuredList);
+
+    for (const world of sortedWorlds) {
+        const groups = groupsByWorld[world.id] || [];
+        if (groups.length === 0) continue;
+
+        const worldSection = document.createElement('div');
+        worldSection.classList.add('collection-section');
+
+        const worldHeader = document.createElement('h2');
+        worldHeader.classList.add('collection-header');
+        const worldURL = world.world_url || world.url || null;
+        worldHeader.innerHTML = worldURL
+            ? `<a href="${worldURL}" target="_blank" rel="noopener">${world.world_title || world.world_name}</a>`
+            : (world.world_title || world.world_name);
+        worldSection.appendChild(worldHeader);
+
+        for (const group of groups) {
+            const books = (booksByGroup[group.id] || []).filter(isBookVisible);
+            if (books.length === 0) continue;
+
+            const groupSection = document.createElement('div');
+            groupSection.classList.add('saga-section');
+
+            const groupHeader = document.createElement('h3');
+            groupHeader.classList.add('saga-header');
+            const groupURL = group.group_url || group.url || null;
+            groupHeader.innerHTML = groupURL
+                ? `<a href="${groupURL}" target="_blank" rel="noopener">${group.group_title}</a>`
+                : group.group_title;
+            groupSection.appendChild(groupHeader);
+
+            books.forEach((book, bookIndex) => {
+                const released = isBookReleased(book);
+                const bookSection = document.createElement('div');
+                bookSection.classList.add('book-section');
+
+                const bookHeader = document.createElement('h4');
+                bookHeader.classList.add('book-header');
+                const bookTitle = book.book_title || 'Untitled';
+
+                if (!released) {
+                    const label = getReleaseLabel(book);
+                    const titlePart = book.book_url
+                        ? `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`
+                        : bookTitle;
+                    bookHeader.innerHTML = `${titlePart} <span class="coming-soon-label">${label}</span>`;
+                } else if (book.book_url) {
+                    bookHeader.innerHTML = `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`;
+                } else {
+                    bookHeader.textContent = bookTitle;
+                }
+                bookSection.appendChild(bookHeader);
+
+                if (bookIndex > 0) {
+                    const newBanner = document.createElement('p');
+                    newBanner.classList.add('new-characters-banner');
+                    newBanner.textContent = '✨ New Characters!';
+                    bookSection.appendChild(newBanner);
+                }
+
+                const bookChars = bookCharacters[book.id] || [];
+
+                const povChars = bookChars
+                    .filter(({ role }) => role === 'POV')
+                    .sort((a, b) => (characterMap[a.character_id]?.name || '').localeCompare(characterMap[b.character_id]?.name || ''));
+
+                const introChars = bookChars
+                    .filter(({ character_id, role }) => {
+                        if (role === 'cloaked' || role === 'POV') return false;
+                        return charFirstVisibleBookPerGroup[character_id]?.[group.id] === book.id;
+                    })
+                    .sort((a, b) => (characterMap[a.character_id]?.name || '').localeCompare(characterMap[b.character_id]?.name || ''));
+
+                const mainChars = [
+                    ...povChars,
+                    ...introChars.filter(c => c.role === 'primary')
+                ];
+                const additionalChars = introChars.filter(c =>
+                    c.role === 'secondary' || c.role === 'tertiary' || c.role === 'mentioned'
+                );
+
+                function appendRoleSection(label, charList) {
+                    if (charList.length === 0) return;
+                    const section = document.createElement('div');
+                    section.classList.add('role-section');
+                    const roleLabel = document.createElement('p');
+                    roleLabel.classList.add('role-label');
+                    roleLabel.textContent = label;
+                    section.appendChild(roleLabel);
+                    const grid = document.createElement('div');
+                    grid.classList.add('character-list-grid');
+                    charList.forEach(({ character_id }) => {
+                        const charData = characterMap[character_id];
+                        if (charData) appendCharacterCard(grid, charData, released);
+                    });
+                    section.appendChild(grid);
+                    bookSection.appendChild(section);
+                }
+
+                appendRoleSection('Main Characters', mainChars);
+                appendRoleSection('Additional Characters', additionalChars);
+
+                groupSection.appendChild(bookSection);
+            });
+
+            worldSection.appendChild(groupSection);
+        }
+
+        structuredList.appendChild(worldSection);
+    }
+}
+
+// =================================================================================
+// 8c. A–Z Index View
+// =================================================================================
+
+function displayCharacterIndex(el, characterMap, charAppearances, bookMap, isBookVisible) {
+    const viewEl = document.getElementById('char-list-view');
+    if (!viewEl) return;
+    viewEl.innerHTML = '';
+
+    // Only include characters who appear in at least one visible book (non-cloaked)
+    const visibleCharIds = new Set();
+    Object.entries(charAppearances).forEach(([charId, appearances]) => {
+        const hasVisible = appearances.some(({ book_id, role }) => {
+            if (role === 'cloaked') return false;
+            const book = bookMap[book_id];
+            return book && isBookVisible(book);
+        });
+        if (hasVisible) visibleCharIds.add(charId);
+    });
+
+    // Build sorted list — sort by goes_by, fall back to name
+    const chars = Object.values(characterMap)
+        .filter(c => visibleCharIds.has(c.id))
+        .sort((a, b) => {
+            const na = (a.goes_by || a.name || '').toLowerCase();
+            const nb = (b.goes_by || b.name || '').toLowerCase();
+            return na.localeCompare(nb);
+        });
+
+    // Group by first letter of goes_by (or name)
+    const byLetter = {};
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    chars.forEach(c => {
+        const letter = (c.goes_by || c.name || '?')[0].toUpperCase();
+        if (!byLetter[letter]) byLetter[letter] = [];
+        byLetter[letter].push(c);
+    });
+
+    // ── Jump bar ──────────────────────────────────────────────────────────
+    const jumpBar = document.createElement('div');
+    jumpBar.classList.add('char-index-jump-bar');
+    alphabet.forEach(letter => {
+        const btn = document.createElement('button');
+        btn.classList.add('jump-bar-letter');
+        btn.textContent = letter;
+        if (!byLetter[letter]) {
+            btn.classList.add('disabled');
+        } else {
+            btn.addEventListener('click', () => {
+                const heading = document.getElementById(`char-index-letter-${letter}`);
+                if (heading) heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+        jumpBar.appendChild(btn);
+    });
+    viewEl.appendChild(jumpBar);
+
+    // ── Letter sections ───────────────────────────────────────────────────
+    const indexList = document.createElement('div');
+    indexList.classList.add('char-index-list');
+
+    alphabet.forEach(letter => {
+        if (!byLetter[letter]) return;
+
+        const heading = document.createElement('h3');
+        heading.classList.add('char-index-letter-heading');
+        heading.id = `char-index-letter-${letter}`;
+        heading.textContent = letter;
+        indexList.appendChild(heading);
+
+        byLetter[letter].forEach(charData => {
+            const row = document.createElement('div');
+            row.classList.add('char-index-row');
+
+            const nameBtn = document.createElement('button');
+            nameBtn.classList.add('char-index-link');
+            nameBtn.textContent = charData.goes_by || charData.name;
+            nameBtn.addEventListener('click', () => displayCharacterDetails(charData.id));
+            row.appendChild(nameBtn);
+
+            // If goes_by differs from full name, show the full name in smaller italic text
+            if (charData.goes_by && charData.goes_by !== charData.name) {
+                const fullName = document.createElement('span');
+                fullName.classList.add('char-index-full-name');
+                fullName.textContent = charData.name;
+                row.appendChild(fullName);
+            }
+
+            indexList.appendChild(row);
+        });
+    });
+
+    viewEl.appendChild(indexList);
 }
 
 // Returns "Coming Spring 2028" style label from a future Date
