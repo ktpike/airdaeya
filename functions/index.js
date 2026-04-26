@@ -25,91 +25,133 @@ const db = getFirestore();
 
 // =============================================================================
 // Numerology Pre-Filter
-// Expression (e) = 3pts, Heart's Desire (h) = 2pts, Personality (p) = 1pt
+// Expression (e) = 1pt, Heart's Desire (h) = 1pt, Life Path (l) = 1pt, Personality (p) = 1pt
+// Super numbers: 11 also scores as 2, 22 also scores as 4, 33 also scores as 6.
+// Each answer's array lists the numerology numbers it points toward.
 // =============================================================================
 const ANSWER_NUMEROLOGY = {
-    // Q1 Recognition
-    "Being a respected authority with a lasting legacy.": [8, 1],
-    "Being known for your cunning and ability to survive.": [5, 1],
-    "Being a pioneer who creates something new and unheard of.": [1, 3],
-    "Being known as someone whose presence makes everything better.": [6, 3],
-    "Being recognized as the one who finally understood what no one else could.": [7, 2],
-    // Q2 Motivation
-    "Finding the truth about a mystery.": [7, 9],
-    "Healing a deep-seated pain.": [2, 6],
-    "Protecting your loved ones.": [6, 2],
-    "Creating something with your hands that others will treasure.": [4, 1],
-    // Q3 Home feeling
-    "Being with my family in a place of my own making.": [6, 4],
-    "Finding a community of like-minded people.": [2, 9],
-    "Working alone toward a major goal.": [1, 7],
-    "Being in a place where I can truly be myself.": [5, 1],
-    // Q4 Skill
-    "The ability to fix and build anything.": [4, 1],
-    "The power to express yourself without words.": [2, 3],
-    "The skill to persuade anyone to do what you want.": [8, 3],
-    "The gift of seeing the future.": [7, 9],
-    "The power to understand the hidden language of living things.": [2, 7],
-    // Q5 Past
-    "It's a source of valuable lessons.": [8, 9],
-    "It's something to be avenged.": [8, 1],
-    "It's a mystery waiting to be uncovered.": [7, 3],
-    "It's something I'd prefer not to dwell on.": [5, 1],
-    // Q6 Animal
-    "Their single-minded focus and unwavering determination.": [1, 4],
-    "Their ability to adapt and survive in any environment.": [5, 9],
-    "Their playful and mischievous nature.": [3, 5],
-    "Their fierce loyalty and protectiveness toward their pack.": [6, 2],
-    // Q7 Challenge
-    "Being unable to speak or communicate effectively.": [3, 2],
-    "Having to follow rules and traditions you don't believe in.": [5, 1],
-    "Living a life where your talents are never fully used.": [1, 4],
-    "Being forced to live a quiet life without adventure.": [5, 3],
-    "Watching those under your protection suffer because of your failures.": [8, 6],
-    // Q8 Secrets
-    "Use them to gain power and influence.": [8, 1],
-    "Share them only with those who are worthy.": [8, 7],
-    "Keep them to yourself, as they are your burden alone.": [7, 4],
-    "Expose the most harmful ones for the good of all.": [9, 6],
-    // Q9 Home means
-    "A place you built with your own hands.": [4, 1],
-    "A place you are trying to get back to.": [6, 2],
-    "A place you are trying to escape.": [5, 1],
-    "Wherever the people I love are gathered around a table.": [6, 3],
-    "Wherever the people I am responsible for are safe.": [8, 6],
-    // Q10 Fear
-    "Losing control of yourself or your circumstances.": [8, 1],
-    "Being misunderstood and never truly seen.": [2, 7],
-    "Being abandoned by those you trust.": [2, 6],
-    "Failing to fulfill your destiny.": [9, 4],
-    // Q11 Strength
-    "My resourcefulness and quick wit.": [3, 5],
-    "My loyalty to those who earn it.": [6, 4],
-    "My ability to see the bigger picture.": [8, 9],
-    "My courage to stand alone.": [1, 7],
-    // Q12 Path
-    "...the most challenging path, the one that promises the most growth.": [1, 9],
-    "...the one that leads to the most fame and recognition.": [8, 3],
-    "...the one that is completely new and promises the most adventure.": [5, 3],
-    "...the one where I can protect those I love.": [6, 2],
+    // Q1 — What's the most appealing form of recognition?
+    "Being a respected authority with a lasting legacy.":                          [8, 1],
+    "Being known for your cunning and ability to survive.":                        [5, 1],
+    "Being a pioneer who creates something new and unheard of.":                   [1, 3],
+    "Being known as someone whose presence makes everything better.":              [6, 3],
+    "Being recognized as the one who finally understood what no one else could.":  [11, 7],   // 11 also scores as 2
+
+    // Q2 — What motivates you the most?
+    "Finding the truth about a mystery.":                                          [7, 9],
+    "Healing a deep-seated pain.":                                                 [2, 6],
+    "Protecting your loved ones.":                                                 [6, 2],
+    "Creating something with your hands that others will treasure.":               [4, 1],
+    "Maintaining the peace and balance of my group.":                              [2, 9],
+
+    // Q3 — What makes you feel most at home?
+    "A bustling marketplace where I can observe and learn.":                       [3, 5],
+    "A quiet, orderly library or laboratory.":                                     [7, 4],
+    "A cozy kitchen filled with the smell of fresh bread.":                        [6, 2],
+    "A hidden sanctuary where I can practice my craft in peace.":                  [4, 7],
+    "The deck of a ship with nothing but the horizon ahead.":                      [5, 9],
+
+    // Q4 — If you could instantly learn any skill, which would you choose?
+    "The ability to fix and build anything.":                                      [4, 1],
+    "The power to express yourself without words.":                                [2, 3],
+    "The skill to persuade anyone to do what you want.":                           [8, 3],
+    "The gift of seeing the future.":                                              [7, 9],
+    "The power to understand the hidden language of living things.":               [2, 7],
+
+    // Q5 — What is your relationship with the past?
+    "It's a source of valuable lessons.":                                          [8, 9],
+    "It's something to be avenged.":                                               [8, 1],
+    "It's a mystery waiting to be uncovered.":                                     [7, 3],
+    "It's something I'd prefer not to dwell on.":                                  [5, 1],
+
+    // Q6 — What's the most appealing thing about a wild animal?
+    "Their single-minded focus and unwavering determination.":                     [1, 4],
+    "Their ability to adapt and survive in any environment.":                      [5, 9],
+    "Their playful and mischievous nature.":                                       [3, 5],
+    "Their fierce loyalty and protectiveness toward their pack.":                  [6, 2],
+    "Their absolute freedom; they answer to no one and live entirely in the moment.": [5, 1],
+
+    // Q7 — What would be the most difficult challenge to face?
+    "Being unable to speak or communicate effectively.":                           [3, 2],
+    "Having to follow rules and traditions you don't believe in.":                 [5, 1],
+    "Living a life where your talents are never fully used.":                      [1, 4],
+    "Being forced to live a quiet life without adventure.":                        [5, 3],
+    "Watching those under your protection suffer because of your failures.":       [8, 6],
+
+    // Q8 — Imagine a world full of secrets. What would you do with them?
+    "Use them to gain power and influence.":                                       [8, 1],
+    "Share them only with those who are worthy.":                                  [8, 7],
+    "Keep them to yourself, as they are your burden alone.":                       [7, 4],
+    "Expose the most harmful ones for the good of all.":                           [9, 6],
+
+    // Q9 — What does 'home' mean to you?
+    "A place you built with your own hands.":                                      [4, 1],
+    "A place you are trying to get back to.":                                      [6, 2],
+    "A place you are trying to escape.":                                           [5, 1],
+    "Wherever the people I love are gathered around a table.":                     [6, 3],
+    "Wherever the people I am responsible for are safe.":                          [8, 6],
+
+    // Q10 — Which of these describes your deepest fear?
+    "Losing control of yourself or your circumstances.":                           [8, 1],
+    "Being misunderstood and never truly seen.":                                   [2, 7],
+    "Being abandoned by those you trust.":                                         [2, 6],
+    "Failing to fulfill your destiny.":                                            [9, 4],
+    "Being trapped in a life of repetitive, soul-crushing routine.":               [5, 3],
+
+    // Q11 — What is your greatest strength?
+    "My unwavering discipline and physical stamina.":                              [4, 8],
+    "My ability to listen and notice the things others miss.":                     [2, 7],
+    "My deep-seated intuition and foresight.":                                     [11, 9],  // 11 also scores as 2
+    "My technical skill and mastery of my tools.":                                 [4, 1],
+    "My adaptability and willingness to take a leap of faith.":                    [5, 9],
+
+    // Q12 — You're at a crossroads. Do you choose the path of...
+    "...the most challenging path, the one that promises the most growth.":        [1, 9],
+    "...the one that leads to the most fame and recognition.":                     [8, 3],
+    "...the one that is completely new and promises the most adventure.":          [5, 3],
+    "...the one where I can protect those I love.":                                [6, 2],
+
+    // Q13 — When things go completely wrong, what is your first instinct?
+    "Take charge immediately and give everyone a task.":                           [8, 1],
+    "Step back, find a quiet spot, and think through the logic.":                 [7, 4],
+    "Look for someone to talk to and find a compromise.":                          [2, 6],
+    "Dive into the work and let my hands solve the problem.":                      [4, 22], // 22 also scores as 4
+    "Follow my gut and move—speed is my best defense.":                           [5, 9],
+
+    // Q14 — In a close-knit group, which role do you naturally fall into?
+    "The Protector: I am the shield for the vulnerable.":                          [6, 8],
+    "The Visionary: I see the future possibilities and goals.":                    [11, 9], // 11 also scores as 2
+    "The Anchor: I keep spirits high with food and optimism.":                     [3, 6],
+    "The Independent: I'm here for the goal, but I need my space.":               [1, 5],
+    "The Negotiator: I handle the talking so we all win.":                         [2, 3],
 };
 
 // Characters guaranteed to always be included (wildcards)
-const WILDCARD_CHARACTER_IDS = new Set(["c_sarafeen"]);
+const WILDCARD_CHARACTER_IDS = new Set();
+
+// Expand a set of numerology numbers so that super numbers also count as their base:
+// 11 → also 2, 22 → also 4, 33 → also 6
+function expandNums(nums) {
+    const expanded = new Set(nums);
+    if (expanded.has(11)) expanded.add(2);
+    if (expanded.has(22)) expanded.add(4);
+    if (expanded.has(33)) expanded.add(6);
+    return expanded;
+}
 
 function scoreCharacterNumerology(charData, userAnswers) {
-    // New field names: expression, hearts_desire, personality
+    // New field names: expression, hearts_desire, life_path, personality
     const e = Number(charData.expression)   || 0;
     const h = Number(charData.hearts_desire) || 0;
+    const l = Number(charData.life_path)     || 0;
     const p = Number(charData.personality)   || 0;
     let score = 0;
     for (const answer of Object.values(userAnswers)) {
-        const nums = ANSWER_NUMEROLOGY[answer] || [];
-        for (const num of nums) {
-            if (num === e)      score += 3;
-            else if (num === h) score += 2;
-            else if (num === p) score += 1;
-        }
+        const nums = expandNums(ANSWER_NUMEROLOGY[answer] || []);
+        if (nums.has(e)) score += 1;
+        if (nums.has(h)) score += 1;
+        if (nums.has(l)) score += 1;
+        if (nums.has(p)) score += 1;
     }
     return score;
 }
@@ -166,9 +208,9 @@ export const processQuizAnswers = onCall(
             }
         }
 
-        // Last question is the food short-answer (q13)
+        // Last question is the food short-answer (q15)
         const foodAnswer =
-            userAnswers["q13"] ||
+            userAnswers["q15"] ||
             userAnswers[Object.keys(userAnswers)[Object.keys(userAnswers).length - 1]] ||
             "something delicious";
 
@@ -352,33 +394,50 @@ export const processQuizAnswers = onCall(
                         ? text.substring(matchSectionStart, matchSectionStart + 300).toUpperCase()
                         : text.substring(0, 300).toUpperCase();
 
-                for (const charData of finalChars) {
-                    if (!charData.name) continue;
-                    const nameUpper      = charData.name.toUpperCase();
-                    const nameParts      = nameUpper.split(" ");
-                    const firstName      = nameParts[0];
-                    const firstAndLast   =
-                        nameParts[0] + (nameParts.length > 1 ? " " + nameParts[nameParts.length - 1] : "");
-                    const goesByUpper    = charData.goes_by ? charData.goes_by.toUpperCase() : null;
+                // Score each candidate by match specificity to avoid substring collisions
+                // (e.g. "ALEENA" matching inside "QATALEENA").
+                // Scoring tiers:
+                //   4 — full name exact match
+                //   3 — first + last name match
+                //   2 — goes_by match
+                //   1 — first name only
+                // Among ties, the longest name wins (most specific string matched).
+                const scored = finalChars
+                    .filter(c => c.name)
+                    .map(charData => {
+                        const nameUpper    = charData.name.toUpperCase();
+                        const nameParts    = nameUpper.split(" ");
+                        const firstName    = nameParts[0];
+                        const firstAndLast =
+                            nameParts[0] + (nameParts.length > 1 ? " " + nameParts[nameParts.length - 1] : "");
+                        const goesByUpper  = charData.goes_by ? charData.goes_by.toUpperCase() : null;
 
-                    if (
-                        matchSectionText.includes(nameUpper) ||
-                        matchSectionText.includes(firstAndLast) ||
-                        matchSectionText.includes(firstName) ||
-                        (goesByUpper && matchSectionText.includes(goesByUpper))
-                    ) {
-                        matchedCharacterName = charData.name;
-                        matchedGoesBy        = charData.goes_by || null;
-                        matchedAliases       = charData.aliases || [];
+                        let matchScore = 0;
+                        if (matchSectionText.includes(nameUpper))                          matchScore = 4;
+                        else if (matchSectionText.includes(firstAndLast))                  matchScore = 3;
+                        else if (goesByUpper && matchSectionText.includes(goesByUpper))    matchScore = 2;
+                        else if (matchSectionText.includes(firstName))                     matchScore = 1;
 
-                        // Return the raw storage path — the client resolves it to a download URL.
-                        // This avoids needing signBlob IAM permissions in the Cloud Function.
-                        const portraitPath = charData.drakkaen_portrait || charData.portrait || null;
-                        matchedPortraitURL = portraitPath; // e.g. "Characters/Bell_Portrait.jpg"
+                        return { charData, matchScore };
+                    })
+                    .filter(c => c.matchScore > 0)
+                    .sort((a, b) =>
+                        b.matchScore - a.matchScore ||
+                        b.charData.name.length - a.charData.name.length
+                    );
 
-                        console.log("Match found:", matchedCharacterName, "portraitPath:", portraitPath);
-                        break;
-                    }
+                if (scored.length > 0) {
+                    const { charData } = scored[0];
+                    matchedCharacterName = charData.name;
+                    matchedGoesBy        = charData.goes_by || null;
+                    matchedAliases       = charData.aliases || [];
+
+                    // Return the raw storage path — the client resolves it to a download URL.
+                    // This avoids needing signBlob IAM permissions in the Cloud Function.
+                    const portraitPath = charData.drakkaen_portrait || charData.portrait || null;
+                    matchedPortraitURL = portraitPath; // e.g. "Characters/Bell_Portrait.jpg"
+
+                    console.log("Match found:", matchedCharacterName, "score:", scored[0].matchScore, "portraitPath:", portraitPath);
                 }
             } catch (e) {
                 console.warn("Could not match character:", e);
