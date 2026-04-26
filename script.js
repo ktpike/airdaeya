@@ -56,9 +56,12 @@ async function discoverLogoPaths() {
                 }
             }
             if (name.includes('ktpike') || name.includes('kt pike') || name.includes('kt_pike')) {
-                if (name.includes('black')) LOGO_PATHS.ktpikeBlack = item.fullPath;
+                if (name.includes('black') && name.includes('colored')) LOGO_PATHS.ktpikeBlackDots = item.fullPath;
+                else if (name.includes('white') && name.includes('colored')) LOGO_PATHS.ktpikeWhiteDots = item.fullPath;
+                else if (name.includes('black')) LOGO_PATHS.ktpikeBlack = item.fullPath;
                 else if (name.includes('white')) LOGO_PATHS.ktpikeWhite = item.fullPath;
-                else if (!LOGO_PATHS.ktpikeBlack && !LOGO_PATHS.ktpikeWhite) LOGO_PATHS.ktpike = item.fullPath;
+                else if (name.includes('color')) LOGO_PATHS.ktpikeColor = item.fullPath;
+                else if (!LOGO_PATHS.ktpike) LOGO_PATHS.ktpike = item.fullPath;
             }
         });
         LOGO_PATHS._discovered = true;
@@ -71,9 +74,12 @@ async function discoverLogoPaths() {
 
 async function getLogoURL(type) {
     await discoverLogoPaths();
-    const path = type === 'icon'       ? LOGO_PATHS.icon :
-                 type === 'ktpike-black' ? (LOGO_PATHS.ktpikeBlack || LOGO_PATHS.ktpike) :
-                 type === 'ktpike-white' ? (LOGO_PATHS.ktpikeWhite || LOGO_PATHS.ktpike) : null;
+    const path = type === 'icon'            ? LOGO_PATHS.icon :
+                 type === 'ktpike-black'       ? (LOGO_PATHS.ktpikeBlack || LOGO_PATHS.ktpike) :
+                 type === 'ktpike-black-dots'  ? (LOGO_PATHS.ktpikeBlackDots || LOGO_PATHS.ktpikeBlack || LOGO_PATHS.ktpike) :
+                 type === 'ktpike-white'       ? (LOGO_PATHS.ktpikeWhite || LOGO_PATHS.ktpike) :
+                 type === 'ktpike-white-dots'  ? (LOGO_PATHS.ktpikeWhiteDots || LOGO_PATHS.ktpikeWhite || LOGO_PATHS.ktpike) :
+                 type === 'ktpike-color'       ? (LOGO_PATHS.ktpikeColor || LOGO_PATHS.ktpike) : null;
     if (!path) return null;
     return getStorageURL(path);
 }
@@ -1717,6 +1723,7 @@ function handleSubmitQuiz() {
                         <button class="download-btn pdf-btn"   id="download-pdf-btn">📄 Save as PDF</button>
                         <button class="download-btn share-btn" id="share-image-btn">📸 Share as Image</button>
                     </div>
+                    <p class="quiz-disclaimer">For entertainment purposes only.</p>
                 </div>
             `;
             document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
@@ -1873,14 +1880,14 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
         }
 
         const pageH_pdf = doc.internal.pageSize.getHeight();
-        const footerY = pageH_pdf - 16;
+        const footerY = pageH_pdf - 22;
         doc.setDrawColor(195, 177, 133);
         doc.setLineWidth(0.3);
         doc.line(margin, footerY - 4, pageW - margin, footerY - 4);
 
-        // FIX: Load KTPike black logo via getStorageURL (Logos folder)
+        // Logo: KTPike color extended
         try {
-            const logoURL = await getLogoURL('ktpike-black');
+            const logoURL = await getLogoURL('ktpike-color');
             if (logoURL) {
                 const logoImg = new Image();
                 logoImg.crossOrigin = 'Anonymous';
@@ -1894,7 +1901,7 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
                 const logoAspect = logoImg.width / logoImg.height;
                 const logoH_pdf = 8;
                 const logoW_pdf = logoH_pdf * logoAspect;
-                doc.addImage(logoC.toDataURL('image/png'), 'PNG', (pageW - logoW_pdf) / 2, footerY - 2, logoW_pdf, logoH_pdf);
+                doc.addImage(logoC.toDataURL('image/png'), 'PNG', (pageW - logoW_pdf) / 2, footerY - 1, logoW_pdf, logoH_pdf);
             } else {
                 throw new Error('No logo URL');
             }
@@ -1902,12 +1909,14 @@ async function generatePDF(characterName, goesBy, responseText, portraitURL) {
             doc.setFontSize(8);
             doc.setFont('helvetica', 'italic');
             doc.setTextColor(143, 97, 144);
-            doc.text('K.T. Pike | ktpike.com', pageW / 2, footerY + 3, { align: 'center' });
+            doc.text('K.T. Pike | ktpike.com', pageW / 2, footerY + 4, { align: 'center' });
         }
         doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('helvetica', 'italic');
         doc.setTextColor(143, 97, 144);
-        doc.text('airdaeya.web.app', pageW / 2, footerY + 8, { align: 'center' });
+        doc.text('For entertainment purposes only.', pageW / 2, footerY + 10, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
+        doc.text('airdaeya.web.app', pageW / 2, footerY + 16, { align: 'center' });
 
         doc.save(`Airdaeium-${(goesBy || characterName || 'Match').replace(/\s+/g, '-')}.pdf`);
 
@@ -2090,7 +2099,63 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
 }
 
 // =================================================================================
-// 13. DOMContentLoaded
+// 13. Footer & About Modal
+// =================================================================================
+
+function renderFooter() {
+    if (document.getElementById('app-footer')) return;
+    const footer = document.createElement('footer');
+    footer.id = 'app-footer';
+    footer.innerHTML = `
+        <div class="footer-logo-wrap" id="footer-logo-wrap"></div>
+        <span class="footer-copyright">© 2026 K.T. Pike</span>
+        <button class="footer-about-link" id="footer-about-btn">About</button>
+    `;
+    document.body.appendChild(footer);
+    document.getElementById('footer-about-btn').addEventListener('click', showAboutModal);
+    // Load white-with-colored-dots logo asynchronously
+    getLogoURL('ktpike-white-dots').then(url => {
+        const wrap = document.getElementById('footer-logo-wrap');
+        if (!wrap) return;
+        if (url) {
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = 'K.T. Pike';
+            img.className = 'footer-logo-img';
+            wrap.appendChild(img);
+        }
+    });
+}
+
+function showAboutModal() {
+    if (document.getElementById('about-modal-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'about-modal-overlay';
+    overlay.innerHTML = `
+        <div id="about-modal">
+            <div class="about-modal-header">About Airdaeium</div>
+            <div class="about-modal-body">
+                <p><strong>Airdaeium</strong> is a reader companion for the <em>Tales of Airdaeya</em> fantasy series by K.T. Pike. Explore character profiles, convert dates on the Oram calendar, and discover which Airdaeya character matches your personality.</p>
+                <p>The personality quiz is for entertainment purposes only. Results are written in the stars — and by Google Gemini AI — based on your answers, and may vary between sessions.</p>
+                <p>For more about the author and the books, visit <a href="https://ktpike.com" target="_blank" rel="noopener">ktpike.com</a>.</p>
+            </div>
+            <button class="about-modal-close" id="about-modal-close-btn">Close</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeAboutModal();
+    });
+    document.getElementById('about-modal-close-btn').addEventListener('click', closeAboutModal);
+}
+
+function closeAboutModal() {
+    const overlay = document.getElementById('about-modal-overlay');
+    if (overlay) overlay.remove();
+}
+
+// =================================================================================
+// 14. DOMContentLoaded
 // =================================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2111,5 +2176,6 @@ document.addEventListener('DOMContentLoaded', () => {
         logoEl.addEventListener('click', displayHomeScreen);
     }
 
+    renderFooter();
     displayHomeScreen();
 });

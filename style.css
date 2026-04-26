@@ -1586,3 +1586,158 @@ h1.character-detail-name {
 .dark-mode .new-characters-banner {
     color: #FFD700;
 }
+
+/* =================================================================================
+   App Footer
+   ================================================================================= */
+
+#app-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    margin-top: 40px;
+    gap: 16px;
+}
+
+.dark-mode #app-footer {
+    background: linear-gradient(135deg, #1a1a2e 0%, #2d2e49 100%);
+    border-top: 1px solid rgba(255, 215, 0, 0.15);
+}
+
+.footer-logo-wrap {
+    display: flex;
+    align-items: center;
+    flex: 1;
+}
+
+.footer-logo-img {
+    height: 28px;
+    width: auto;
+    opacity: 0.88;
+}
+
+.footer-copyright {
+    font-family: var(--font-header);
+    font-size: 0.82em;
+    letter-spacing: 0.08em;
+    color: rgba(255, 215, 0, 0.8);
+    white-space: nowrap;
+}
+
+.footer-about-link {
+    background: none;
+    border: 1px solid rgba(255, 215, 0, 0.35);
+    border-radius: 4px;
+    color: rgba(255, 215, 0, 0.75);
+    font-family: var(--font-header);
+    font-size: 0.82em;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
+}
+
+.footer-about-link:hover {
+    background-color: rgba(255, 215, 0, 0.15);
+    color: #FFD700;
+    border-color: rgba(255, 215, 0, 0.6);
+}
+
+/* =================================================================================
+   About Modal
+   ================================================================================= */
+
+#about-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+#about-modal {
+    background-color: var(--bg-color);
+    border-radius: 10px;
+    max-width: 480px;
+    width: 100%;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.about-modal-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    color: #FFD700;
+    font-family: var(--font-display);
+    font-size: 1.2em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 16px 24px;
+}
+
+.about-modal-body {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.about-modal-body p {
+    font-family: var(--font-serif);
+    font-size: 1em;
+    color: var(--text-color);
+    line-height: 1.65;
+}
+
+.about-modal-body a {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+.dark-mode .about-modal-body a {
+    color: #FFD700;
+}
+
+.about-modal-close {
+    display: block;
+    width: calc(100% - 48px);
+    margin: 0 24px 20px;
+    padding: 10px;
+    background-color: var(--primary-color);
+    color: #FFD700;
+    font-family: var(--font-header);
+    font-size: 0.9em;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+.about-modal-close:hover {
+    opacity: 0.85;
+}
+
+/* =================================================================================
+   Quiz Disclaimer
+   ================================================================================= */
+
+.quiz-disclaimer {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 0.82em;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-top: 16px;
+    opacity: 0.8;
+}

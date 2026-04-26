@@ -1,6 +1,9 @@
 [
   {
-    "origin": ["https://airdaeya.web.app", "https://airdaeya.firebaseapp.com", "http://localhost"],
+    "origin": [
+      "https://airdaeya.web.app",
+      "https://airdaeya--staging-te4hobck.web.app"
+    ],
     "method": ["GET"],
     "maxAgeSeconds": 3600
   }
