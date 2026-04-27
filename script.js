@@ -97,6 +97,20 @@ function resolvePortraitPath(raw) {
     return 'Characters/' + raw;
 }
 
+// =================================================================================
+// UTM Tracking Helper
+// =================================================================================
+// Appends UTM parameters to any outbound link so WordPress Stats (and Jetpack)
+// can identify traffic that came from the Airdaeium app.
+// utm_source  → always 'airdaeium_app'
+// utm_medium  → always 'app'
+// utm_campaign → the specific context (e.g. 'book_link', 'about_modal')
+function addAppTracking(url, campaign = 'general') {
+    if (!url) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}utm_source=airdaeium_app&utm_medium=app&utm_campaign=${campaign}`;
+}
+
 // FIX: Placeholder data URI — avoids the via.placeholder.com external request error
 const PLACEHOLDER_IMG = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22100%22 height%3D%22100%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
 const PLACEHOLDER_IMG_LARGE = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22200%22 height%3D%22200%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
@@ -202,12 +216,14 @@ function displayHomeScreen() {
             <button id="view-characters-btn" class="action-button">Character List</button>
             <button id="view-calendar-btn"   class="action-button">Calendar Converter</button>
             <button id="start-quiz-btn"      class="action-button">Personality Quiz</button>
+            <button id="view-map-btn"        class="action-button">World Map</button>
         </div></div>
     `;
 
     document.getElementById('view-characters-btn').addEventListener('click', displayCharacterList);
     document.getElementById('view-calendar-btn').addEventListener('click', displayCalendarConverter);
     document.getElementById('start-quiz-btn').addEventListener('click', displayPersonalityQuiz);
+    document.getElementById('view-map-btn').addEventListener('click', displayWorldMap);
 }
 
 // =================================================================================
@@ -411,7 +427,7 @@ function renderProfilesView(el, characterMap, worldMap, groupMap, bookMap, books
         worldHeader.classList.add('collection-header');
         const worldURL = world.world_url || world.url || null;
         worldHeader.innerHTML = worldURL
-            ? `<a href="${worldURL}" target="_blank" rel="noopener">${world.world_title || world.world_name}</a>`
+            ? `<a href="${addAppTracking(worldURL, 'world_link')}" target="_blank" rel="noopener">${world.world_title || world.world_name}</a>`
             : (world.world_title || world.world_name);
         worldSection.appendChild(worldHeader);
 
@@ -426,7 +442,7 @@ function renderProfilesView(el, characterMap, worldMap, groupMap, bookMap, books
             groupHeader.classList.add('saga-header');
             const groupURL = group.group_url || group.url || null;
             groupHeader.innerHTML = groupURL
-                ? `<a href="${groupURL}" target="_blank" rel="noopener">${group.group_title}</a>`
+                ? `<a href="${addAppTracking(groupURL, 'group_link')}" target="_blank" rel="noopener">${group.group_title}</a>`
                 : group.group_title;
             groupSection.appendChild(groupHeader);
 
@@ -442,11 +458,11 @@ function renderProfilesView(el, characterMap, worldMap, groupMap, bookMap, books
                 if (!released) {
                     const label = getReleaseLabel(book);
                     const titlePart = book.book_url
-                        ? `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`
+                        ? `<a href="${addAppTracking(book.book_url, 'book_link')}" target="_blank" rel="noopener">${bookTitle}</a>`
                         : bookTitle;
                     bookHeader.innerHTML = `${titlePart} <span class="coming-soon-label">${label}</span>`;
                 } else if (book.book_url) {
-                    bookHeader.innerHTML = `<a href="${book.book_url}" target="_blank" rel="noopener">${bookTitle}</a>`;
+                    bookHeader.innerHTML = `<a href="${addAppTracking(book.book_url, 'book_link')}" target="_blank" rel="noopener">${bookTitle}</a>`;
                 } else {
                     bookHeader.textContent = bookTitle;
                 }
@@ -1065,7 +1081,7 @@ async function displayCharacterDetails(characterId) {
                 const ageNote = age !== null ? `<span class="book-age-note"> (age&nbsp;${age})</span>` : '';
                 const roleNote = role === 'POV' ? ' <span class="book-role-note">POV</span>' : '';
                 const linked = book.book_url
-                    ? `<a href="${book.book_url}" target="_blank" rel="noopener" class="info-book-link">${title}</a>`
+                    ? `<a href="${addAppTracking(book.book_url, 'book_link')}" target="_blank" rel="noopener" class="info-book-link">${title}</a>`
                     : title;
                 return `<span class="book-appearance-item">${linked}${roleNote}${ageNote}</span>`;
             });
@@ -2099,7 +2115,271 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
 }
 
 // =================================================================================
-// 13. Footer & About Modal
+// 13. World Map
+// =================================================================================
+
+async function displayWorldMap() {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading world map...</h2>`;
+
+    try {
+        // ── Load all continents, sort by sort_order ─────────────────────────
+        const continentsSnap = await db.collection('continents').orderBy('sort_order').get();
+        const allContinents = continentsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // ── For now: only show revealed continents (premium gate goes here later) ──
+        const isPremium = false; // placeholder for future auth
+        const visibleContinents = allContinents.filter(c => c.revealed || isPremium);
+
+        if (visibleContinents.length === 0) {
+            el.innerHTML = `
+                <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+                <h2>No maps available yet.</h2>
+            `;
+            document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+            return;
+        }
+
+        // ── Load countries for all visible continents ───────────────────────
+        const countriesSnap = await db.collection('countries').get();
+        const allCountries = {};
+        countriesSnap.forEach(d => {
+            const data = { id: d.id, ...d.data() };
+            allCountries[data.id] = data;
+        });
+
+        // ── Use the last visible continent's map as the base image ──────────
+        // (When premium unlocks, the full world map replaces the partial one)
+        const baseContinent = visibleContinents[visibleContinents.length - 1];
+        const mapURL = await getStorageURL(baseContinent.map_path);
+
+        // ── Render shell ────────────────────────────────────────────────────
+        el.innerHTML = `
+            <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+            <h1>World Map</h1>
+            <p class="welcome-subtitle">Hover over a region to explore. Click to learn more.</p>
+            <div class="map-wrapper" id="map-wrapper">
+                <img id="map-base-img" src="${mapURL}" alt="World Map" class="map-base-img" />
+                <div class="map-overlay-container" id="map-overlay-container"></div>
+                <div class="map-tooltip" id="map-tooltip"></div>
+            </div>
+        `;
+        document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+
+        const overlayContainer = document.getElementById('map-overlay-container');
+        const tooltip          = document.getElementById('map-tooltip');
+        const baseImg          = document.getElementById('map-base-img');
+
+        // ── Wait for image to load so dimensions are known ──────────────────
+        await new Promise(res => {
+            if (baseImg.complete) { res(); return; }
+            baseImg.onload = res;
+        });
+
+        // ── Load and render each continent's SVG overlay ────────────────────
+        for (const continent of visibleContinents) {
+            if (!continent.svg_overlay_path) continue;
+            const svgURL = await getStorageURL(continent.svg_overlay_path);
+            if (!svgURL) continue;
+
+            const response = await fetch(svgURL);
+            const svgText  = await response.text();
+
+            // Parse the SVG text into a DOM element
+            const parser  = new DOMParser();
+            const svgDoc  = parser.parseFromString(svgText, 'image/svg+xml');
+            const svgEl   = svgDoc.querySelector('svg');
+            if (!svgEl) continue;
+
+            // Make the SVG fill the overlay container exactly
+            svgEl.setAttribute('width',  '100%');
+            svgEl.setAttribute('height', '100%');
+            svgEl.style.position = 'absolute';
+            svgEl.style.top      = '0';
+            svgEl.style.left     = '0';
+
+            // ── Wire up each country path ────────────────────────────────────
+            const paths = svgEl.querySelectorAll('path, polygon, ellipse, circle, rect');
+            paths.forEach(path => {
+                const countryId = path.getAttribute('id');
+                const country   = allCountries[countryId];
+                if (!country) return;
+
+                // Base styles — invisible but interactive
+                path.style.fill            = 'transparent';
+                path.style.stroke          = 'none';
+                path.style.cursor          = 'pointer';
+                path.style.transition      = 'fill 0.2s ease';
+
+                // Hover — gold highlight
+                path.addEventListener('mouseenter', (e) => {
+                    path.style.fill    = 'rgba(255, 215, 0, 0.35)';
+                    path.style.stroke  = '#FFD700';
+                    path.style.strokeWidth = '2';
+                    tooltip.textContent    = country.ctry_name || countryId;
+                    tooltip.style.display  = 'block';
+                });
+
+                path.addEventListener('mousemove', (e) => {
+                    const wrapper = document.getElementById('map-wrapper');
+                    const rect    = wrapper.getBoundingClientRect();
+                    tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+                    tooltip.style.top  = (e.clientY - rect.top  - 28) + 'px';
+                });
+
+                path.addEventListener('mouseleave', () => {
+                    path.style.fill       = 'transparent';
+                    path.style.stroke     = 'none';
+                    tooltip.style.display = 'none';
+                });
+
+                // Click → country detail page
+                path.addEventListener('click', () => {
+                    displayCountryDetails(countryId);
+                });
+            });
+
+            overlayContainer.appendChild(svgEl);
+        }
+
+    } catch (error) {
+        console.error('Error loading world map:', error);
+        el.innerHTML = `
+            <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+            <h2>Error loading map. Please try again.</h2>
+        `;
+        document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+    }
+}
+
+// =================================================================================
+// 14. Country Details
+// =================================================================================
+
+async function displayCountryDetails(countryId) {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading...</h2>`;
+
+    try {
+        // ── Fetch country, books, country_appearances, and capital city ────
+        const [countryDoc, booksSnap, appearancesSnap, capitalSnap] = await Promise.all([
+            db.collection('countries').doc(countryId).get(),
+            db.collection('books').get(),
+            db.collection('country_appearances').where('ctry_id', '==', countryId).get(),
+            db.collection('cities')
+                .where('ctry_id', '==', countryId)
+                .where('is_capital', '==', true)
+                .get(),
+        ]);
+
+        if (!countryDoc.exists) {
+            el.innerHTML = `
+                <button class="back-button" id="back-to-map-btn">← Back to Map</button>
+                <h2>Country not found.</h2>
+            `;
+            document.getElementById('back-to-map-btn').addEventListener('click', displayWorldMap);
+            return;
+        }
+
+        const data = countryDoc.data();
+
+        const bookMap = {};
+        booksSnap.forEach(d => { bookMap[d.id] = { id: d.id, ...d.data() }; });
+
+        // ── Resolve capital city ─────────────────────────────────────────────
+        const capitalCity = capitalSnap.empty ? null : capitalSnap.docs[0].data();
+
+        // ── Resolve linked books via country_appearances ────────────────────
+        const linkedBooks = [];
+        appearancesSnap.forEach(d => {
+            const { book_id } = d.data();
+            const book = bookMap[book_id];
+            if (book && book.released) linkedBooks.push(book);
+        });
+        linkedBooks.sort((a, b) => (a.book_order || 0) - (b.book_order || 0));
+
+        // ── Escape helper ───────────────────────────────────────────────────
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Render shell ────────────────────────────────────────────────────
+        el.innerHTML = `
+            <button class="back-button" id="back-to-map-btn">← Back to Map</button>
+            <h1 class="character-detail-name">${escHtml(data.ctry_name || countryId)}</h1>
+            <div class="character-detail-content">
+                <div class="character-detail-left" id="country-left"></div>
+                <div class="character-detail-description" id="country-right"></div>
+            </div>
+        `;
+        document.getElementById('back-to-map-btn').addEventListener('click', displayWorldMap);
+
+        const leftCol  = document.getElementById('country-left');
+        const rightCol = document.getElementById('country-right');
+
+        // ── Country close-up map (if available) ─────────────────────────────
+        if (data.map_path) {
+            const mapURL = await getStorageURL(data.map_path);
+            if (mapURL) {
+                const mapImg = document.createElement('img');
+                mapImg.src = mapURL;
+                mapImg.alt = `Map of ${data.ctry_name}`;
+                mapImg.classList.add('character-portrait-detail');
+                leftCol.appendChild(mapImg);
+            }
+        }
+
+        // ── Info box ─────────────────────────────────────────────────────────
+        const infoRows = [];
+        if (capitalCity) {
+            infoRows.push({ label: 'Capital', html: escHtml(capitalCity.city_name) });
+        }
+        if (linkedBooks.length) {
+            const bookLinks = linkedBooks.map(book => {
+                const title = escHtml(book.book_title || 'Untitled');
+                return book.book_url
+                    ? `<a href="${addAppTracking(book.book_url, 'country_book_link')}" target="_blank" rel="noopener" class="info-book-link">${title}</a>`
+                    : title;
+            }).join(', ');
+            infoRows.push({ label: 'Appears In', html: bookLinks });
+        }
+
+        if (infoRows.length) {
+            const infoBox = document.createElement('div');
+            infoBox.classList.add('character-info-box');
+            infoBox.innerHTML = `
+                <div class="character-info-box-header">Details</div>
+                <dl class="character-info-list">
+                    ${infoRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            leftCol.appendChild(infoBox);
+        }
+
+        // ── Description ──────────────────────────────────────────────────────
+        if (data.ctry_description) {
+            rightCol.insertAdjacentHTML('afterbegin', data.ctry_description);
+        }
+
+    } catch (error) {
+        console.error('Error loading country details:', error);
+        el.innerHTML = `
+            <button class="back-button" id="back-to-map-btn">← Back to Map</button>
+            <h2>Error loading country details. Please try again.</h2>
+        `;
+        document.getElementById('back-to-map-btn').addEventListener('click', displayWorldMap);
+    }
+}
+
+// =================================================================================
+// 15. Footer & About Modal
 // =================================================================================
 
 function renderFooter() {
@@ -2137,7 +2417,7 @@ function showAboutModal() {
             <div class="about-modal-body">
                 <p><strong>Airdaeium</strong> is a reader companion for the <em>Tales of Airdaeya</em> fantasy series by K.T. Pike. Explore character profiles, convert dates on the Oram calendar, and discover which Airdaeya character matches your personality.</p>
                 <p>The personality quiz is for entertainment purposes only. Results are written in the stars — and by Google Gemini AI — based on your answers, and may vary between sessions.</p>
-                <p>For more about the author and the books, visit <a href="https://ktpike.com" target="_blank" rel="noopener">ktpike.com</a>.</p>
+                <p>For more about the author and the books, visit <a href="${addAppTracking('https://ktpike.com', 'about_modal')}" target="_blank" rel="noopener">ktpike.com</a>.</p>
             </div>
             <button class="about-modal-close" id="about-modal-close-btn">Close</button>
         </div>
@@ -2159,6 +2439,50 @@ function closeAboutModal() {
 // =================================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
+
+    // ── Inject map styles ────────────────────────────────────────────────────
+    const mapStyles = document.createElement('style');
+    mapStyles.textContent = `
+        .map-wrapper {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            display: block;
+        }
+        .map-base-img {
+            display: block;
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 2px solid var(--primary-color);
+        }
+        .map-overlay-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+        }
+        .map-overlay-container svg {
+            pointer-events: all;
+        }
+        .map-tooltip {
+            position: absolute;
+            background: var(--primary-color);
+            color: #FFD700;
+            font-family: var(--font-header);
+            font-size: 0.85rem;
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid #FFD700;
+            pointer-events: none;
+            display: none;
+            white-space: nowrap;
+            z-index: 10;
+        }
+    `;
+    document.head.appendChild(mapStyles);
     initializeTheme();
 
     const themeToggleButton = document.getElementById('theme-toggle');
