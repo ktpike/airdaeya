@@ -1741,3 +1741,327 @@ h1.character-detail-name {
     margin-top: 16px;
     opacity: 0.8;
 }
+/* =================================================================================
+   Moon Tracker Styles
+   Add these to the bottom of style.css (or after the Calendar Converter section)
+   ================================================================================= */
+
+/* ── Input panel ─────────────────────────────────────────────────────────────── */
+
+.moon-tracker-input-panel {
+    margin-bottom: 24px;
+}
+
+.moon-tracker-inputs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+@media (max-width: 700px) {
+    .moon-tracker-inputs {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 400px) {
+    .moon-tracker-inputs {
+        grid-template-columns: 1fr;
+    }
+}
+
+.moon-input-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.mt-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid rgba(69,35,69,0.3);
+    border-radius: 6px;
+    font-family: var(--font-body);
+    font-size: 1em;
+    color: var(--text-color);
+    background-color: var(--surface-color);
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.dark-mode .mt-input {
+    border-color: rgba(255,215,0,0.2);
+    background-color: var(--secondary-color);
+    color: var(--text-color);
+}
+
+/* ── Sky diagram ─────────────────────────────────────────────────────────────── */
+
+.moon-sky-diagram {
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255,215,0,0.15);
+    background: #0a0818;
+}
+
+/* ── Moon cards grid ─────────────────────────────────────────────────────────── */
+
+.moon-tracker-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+@media (max-width: 700px) {
+    .moon-tracker-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+.moon-card {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--moon-color, #452345) 35%, transparent);
+    background-color: var(--bg-color);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    transition: box-shadow 0.15s ease;
+}
+
+.moon-card:hover {
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2);
+}
+
+
+
+.moon-card-header {
+    font-family: var(--font-display);
+    font-size: 1.1em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 12px 16px 10px;
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.dark-mode .moon-card-header {
+    background: linear-gradient(135deg, #1a1535 0%, #2d1850 100%);
+}
+
+.moon-card-badge {
+    font-family: var(--font-header);
+    font-size: 0.65em;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+}
+
+.badge--night {
+    background: rgba(255,215,0,0.2);
+    color: #FFD700;
+    border: 1px solid rgba(255,215,0,0.4);
+}
+
+.badge--day {
+    background: rgba(150,150,160,0.2);
+    color: rgba(200,200,210,0.8);
+    border: 1px solid rgba(150,150,160,0.3);
+}
+
+.badge--daysky {
+    background: rgba(135,206,235,0.2);
+    color: #87ceeb;
+    border: 1px solid rgba(135,206,235,0.4);
+}
+
+.moon-card-body {
+    padding: 14px 16px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.moon-phase-icon {
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.moon-phase-icon svg {
+    display: block;
+}
+
+.moon-card-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.moon-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(69,35,69,0.08);
+    font-size: 0.82em;
+}
+
+.dark-mode .moon-stat {
+    border-bottom-color: rgba(255,215,0,0.07);
+}
+
+.moon-stat:last-child {
+    border-bottom: none;
+}
+
+.moon-stat-label {
+    font-family: var(--font-header);
+    font-size: 0.85em;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.moon-stat-value {
+    font-family: var(--font-serif);
+    color: var(--text-color);
+    text-align: right;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.moon-visibility {
+    font-style: italic;
+    font-size: 0.92em;
+    opacity: 0.85;
+}
+
+/* Illumination bar */
+.illum-bar-wrap {
+    display: inline-block;
+    width: 48px;
+    height: 6px;
+    background: rgba(69,35,69,0.15);
+    border-radius: 3px;
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.dark-mode .illum-bar-wrap {
+    background: rgba(255,215,0,0.1);
+}
+
+.illum-bar {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.moon-card-footer {
+    font-family: var(--font-header);
+    font-size: 0.72em;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 8px 14px;
+    border-top: 1px solid rgba(69,35,69,0.1);
+    background: rgba(69,35,69,0.03);
+}
+
+.dark-mode .moon-card-footer {
+    border-top-color: rgba(255,215,0,0.06);
+}
+
+/* ── Events panel ────────────────────────────────────────────────────────────── */
+
+.moon-tracker-events {
+    margin-bottom: 20px;
+}
+
+.moon-events-title {
+    font-family: var(--font-display);
+    font-size: 0.95em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--primary-color);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(69,35,69,0.2);
+}
+
+.dark-mode .moon-events-title {
+    color: #FFD700;
+    border-bottom-color: rgba(255,215,0,0.2);
+}
+
+.moon-events-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+@media (max-width: 500px) {
+    .moon-events-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.moon-event {
+    border-radius: 10px;
+    padding: 16px 18px;
+    text-align: center;
+    border: 1px solid;
+}
+
+.moon-event--dark {
+    background: linear-gradient(135deg, #0a0818, #1a1535);
+    border-color: rgba(140,120,200,0.3);
+}
+
+.moon-event--bright {
+    background: linear-gradient(135deg, #1a1010, #2d1810);
+    border-color: rgba(255,215,0,0.3);
+}
+
+.moon-event-icon {
+    font-size: 1.6em;
+    margin-bottom: 6px;
+}
+
+.moon-event-label {
+    font-family: var(--font-display);
+    font-size: 0.85em;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,215,0,0.7);
+    margin-bottom: 6px;
+}
+
+.moon-event-date {
+    font-family: var(--font-serif);
+    font-size: 1em;
+    background-image: linear-gradient(to right, #FFD700, #DAA520, #FFD700);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.moon-event-away {
+    font-family: var(--font-header);
+    font-size: 0.78em;
+    letter-spacing: 0.08em;
+    color: rgba(255,215,0,0.5);
+    text-transform: uppercase;
+}

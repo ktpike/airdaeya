@@ -217,6 +217,7 @@ function displayHomeScreen() {
             <button id="view-calendar-btn"   class="action-button">Calendar Converter</button>
             <button id="start-quiz-btn"      class="action-button">Personality Quiz</button>
             <button id="view-map-btn"        class="action-button">World Map</button>
+            <button id="view-moon-btn"       class="action-button">Moon Tracker</button>
         </div></div>
     `;
 
@@ -224,6 +225,7 @@ function displayHomeScreen() {
     document.getElementById('view-calendar-btn').addEventListener('click', displayCalendarConverter);
     document.getElementById('start-quiz-btn').addEventListener('click', displayPersonalityQuiz);
     document.getElementById('view-map-btn').addEventListener('click', displayWorldMap);
+    document.getElementById('view-moon-btn').addEventListener('click', displayMoonTracker);
 }
 
 // =================================================================================
@@ -2503,3 +2505,610 @@ document.addEventListener('DOMContentLoaded', () => {
     renderFooter();
     displayHomeScreen();
 });
+// =================================================================================
+// 11. Moon Tracker
+// =================================================================================
+//
+// HOW TO USE:
+//   1. Add the JS below into script.js (after section 10, the Calendar Converter).
+//   2. Add the CSS from moon-tracker-styles.css into style.css.
+//   3. In displayHomeScreen(), add this button inside .home-buttons:
+//   4. In displayHomeScreen(), add this listener:
+//
+// ORBITAL CONSTANTS (confirmed against your calibration data):
+//   - cb_solar_year for ALL bodies is in Oram days, not Oram years.
+//   - Oram itself has cb_solar_year = 396, confirming this.
+//   - Phase formula: (absoluteDay / period) % 1.0
+//     where absoluteDay counts from 0 = epoch (calendar Day 1 = day 1, epoch = "day 0").
+//   - Longitude 0 = Stragos meridian (directly opposite the epoch alignment line).
+//     At the epoch, Leha was at longitude 180° from Stragos (i.e., anti-meridian),
+//     so Stragos was in the middle of the night sky. This anchors our sky geometry.
+// =================================================================================
+
+// ── Orbital constants ─────────────────────────────────────────────────────────────
+const MOON_TRACKER = {
+    // Moon periods in Oram days
+    KUU:  { name: 'Kuu',  period: 14.0000000012,    color: '#e8eeff', radius: 9 },  // silvery-white Love Goddess
+    ISA:  { name: 'Isa',  period: 43.613852953,     color: '#40c8a0', radius: 6 },  // teal (green↔blue Trickster)
+    UMAN: { name: 'Uman', period: 64.9515419873522, color: '#d94040', radius: 5 },  // red God of War
+
+    // Hours per Oram day
+    HOURS_PER_DAY: 28,
+
+    // Calendar structure
+    DAYS_PER_YEAR:  396,
+    DAYS_PER_TQ:    33,
+
+    // Tritquarter names (1-indexed)
+    TQ_NAMES: [
+        '', // placeholder so index matches tq number
+        'Mamdi','Netamee','Elany',
+        'Bamdi','Kazamee','Ojany',
+        'Zamdi','Pilamee','Itrany',
+        'Samdi','Tihamee','Anany'
+    ],
+};
+
+// ── Core math ─────────────────────────────────────────────────────────────────────
+
+/** Convert a calendar date + time to absolute fractional day since epoch.
+ *  Calendar year 1, TQ 1, Day 1 = absolute day 1 (epoch = day 0).
+ *  @param {number} year  - AWB year (1+)
+ *  @param {number} tq    - tritquarter (1-12)
+ *  @param {number} day   - day within TQ (1-33)
+ *  @param {number} hour  - Oram hour (0-27, where 28:00 = midnight = 0 of next day)
+ */
+function calendarToFractionalDay(year, tq, day, hour) {
+    const dayOfYear = (tq - 1) * 33 + day;       // 1-396
+    const absDay    = (year - 1) * 396 + dayOfYear; // integer calendar day
+    const fraction  = hour / 28;                  // fraction through the day
+    return absDay - 1 + fraction;                 // 0-based fractional day from epoch
+}
+
+/** Moon phase: 0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter */
+function moonPhase(fractionalDay, period) {
+    // Using (day / period) % 1 — confirmed against calibration data
+    return ((fractionalDay + 1) / period) % 1;
+    // +1 because the formula uses (absoluteCalendarDay / period), and
+    // fractionalDay = absCalDay - 1 + hourFraction, but for the epoch
+    // calibration the integer formula was (day / period) % 1 where day = absCalDay.
+    // So we add back the 1 to match.
+}
+
+/** Phase distance from new moon, in days */
+function distFromNew(phase, period) {
+    return Math.min(phase, 1 - phase) * period;
+}
+
+/** Phase distance from full moon, in days */
+function distFromFull(phase, period) {
+    return Math.abs(phase - 0.5) * period;
+}
+
+/** Illumination fraction visible from Oram's surface (0 = new, 1 = full) */
+function illumination(phase) {
+    // Cosine illumination: 0 at new (phase=0), 1 at full (phase=0.5)
+    return (1 - Math.cos(phase * 2 * Math.PI)) / 2;
+}
+
+/** Sky longitude of a moon at a given fractional day and Oram hour.
+ *
+ *  Sky geometry:
+ *  - Oram rotates once per day (360° / 28 hours).
+ *  - At the epoch (fractionalDay=0), it is midnight at Stragos (lon 0).
+ *    Leha was at the anti-meridian (lon 180° from Stragos as seen from above).
+ *    A "new moon" moon at the epoch would be between Oram and Leha
+ *    → new moon is on the Leha-side = lon 180° at midnight at Stragos.
+ *
+ *  Moon longitude on Oram's surface at time T:
+ *    moonAngle_inertial = phase × 360°       (angle from Leha direction, prograde)
+ *    OramRotation       = (hourOfDay / 28) × 360°   (how much Oram has rotated since midnight)
+ *    Stragos is at lon 0. At midnight (hour=0), Stragos faces away from Leha (lon 180° in inertial).
+ *    lon_Stragos_inertial = 180° + OramRotation
+ *    moonLon = moonAngle_inertial - lon_Stragos_inertial   (mod 360)
+ *            = phase×360 - (180 + (hour/28)×360)           (mod 360)
+ *
+ *  Positive = east of Stragos (moon is rising / has risen).
+ *  Negative = west of Stragos (moon has set / is setting).
+ *  ≈ 0      = moon is near the meridian (overhead at Stragos).
+ *  ≈ ±180   = moon is below the horizon (near the Leha side at midnight).
+ *
+ *  A moon is above the horizon (visible at night) when its longitude from
+ *  Stragos is between -90° and +90° (i.e. on the night side).
+ *  It's visible during the day when between +90° and +270° (day side),
+ *  but only if illuminated enough to see.
+ *
+ *  @param {number} phase   0–1
+ *  @param {number} hour    0–27
+ *  @returns {number} longitude in degrees, -180 to +180
+ */
+function moonLongitude(phase, hour) {
+    const moonAngle  = phase * 360;
+    const oramRot    = (hour / 28) * 360;
+    const stragosInertial = 180 + oramRot;
+    let lon = moonAngle - stragosInertial;
+    // Normalise to -180..+180
+    lon = ((lon % 360) + 360) % 360;
+    if (lon > 180) lon -= 360;
+    return lon;
+}
+
+/** Describe where the moon is in the sky */
+function skyPosition(lon, phase) {
+    const illum = illumination(phase);
+    const absDeg = Math.abs(lon);
+
+    // Night side: -90 to +90
+    if (absDeg <= 90) {
+        if (absDeg < 5)  return { visible: true, desc: 'directly overhead (meridian)', night: true };
+        if (lon > 0)     return { visible: true, desc: `${lon.toFixed(0)}° east (rising)`, night: true };
+        return               { visible: true, desc: `${Math.abs(lon).toFixed(0)}° west (setting)`, night: true };
+    }
+
+    // Day side: 90–270 from night-centre = below horizon or in daytime sky
+    if (absDeg > 90 && absDeg <= 180) {
+        const horizDeg = (absDeg - 90).toFixed(0);
+        const side = lon > 0 ? 'east' : 'west';
+        return { visible: false, desc: `below horizon (${horizDeg}° past ${side} horizon)`, night: false };
+    }
+
+    return { visible: false, desc: 'below horizon', night: false };
+}
+
+/** Phase name string */
+function phaseName(phase) {
+    const p = phase;
+    if (p < 0.04 || p > 0.96)         return 'New Moon 🌑';
+    if (p < 0.21)                      return 'Waxing Crescent 🌒';
+    if (p < 0.29)                      return 'First Quarter 🌓';
+    if (p < 0.46)                      return 'Waxing Gibbous 🌔';
+    if (p < 0.54)                      return 'Full Moon 🌕';
+    if (p < 0.71)                      return 'Waning Gibbous 🌖';
+    if (p < 0.79)                      return 'Last Quarter 🌗';
+    return                               'Waning Crescent 🌘';
+}
+
+/** Moon SVG disc with correct phase shading */
+function moonSVG(phase, color, size) {
+    // Phase rendering using the standard two-half technique:
+    //
+    //   phase 0.0 = New Moon     (fully dark)
+    //   phase 0.25= First Qtr   (right half lit)
+    //   phase 0.5 = Full Moon    (fully lit)
+    //   phase 0.75= Last Qtr    (left half lit)
+    //
+    // Strategy: always start with a fully dark disc.
+    // Then draw the lit region as two parts:
+    //   1. A half-disc rect on the lit side (right for waxing, left for waning).
+    //   2. A terminator ellipse that either ADDS more light (gibbous) or
+    //      REMOVES light (crescent) from the opposite side.
+    //
+    // Terminator ellipse x-radius: |cos(phase × 2π)| × r
+    //   At new/full → rx = r  (terminator spans full width → crescent → dark)
+    //   At quarters → rx = 0  (no terminator → exactly half lit)
+    //
+    // For WAXING (phase 0→0.5):
+    //   Lit side = RIGHT.  The right half-rect is always drawn.
+    //   phase < 0.25 (crescent): ellipse on RIGHT is DARK → hides most of right half
+    //   phase > 0.25 (gibbous):  ellipse on LEFT  is LIT  → adds to right half
+    //
+    // For WANING (phase 0.5→1.0):
+    //   Lit side = LEFT.  The left half-rect is always drawn.
+    //   phase < 0.75 (gibbous):  ellipse on RIGHT is LIT  → adds to left half
+    //   phase > 0.75 (crescent): ellipse on LEFT  is DARK → hides most of left half
+
+    const r = size / 2;
+    const cx = r, cy = r;
+    const dark = '#1a1a2e';
+
+    const waning   = phase > 0.5;
+    const gibbous  = waning ? (phase < 0.75) : (phase > 0.25);
+    const termRx   = Math.abs(Math.cos(phase * 2 * Math.PI)) * r;
+
+    // The terminator ellipse sits on the OPPOSITE side from the lit half-rect,
+    // and is colored to add (gibbous) or subtract (crescent) light.
+    // Waxing: lit=right, terminator on left  (x = cx - termRx  → centred at cx)
+    // Waning: lit=left,  terminator on right (x = cx + termRx  → centred at cx)
+    // Since the ellipse is centred at cx either way, we just flip the fill color.
+    const termFill = gibbous ? color : dark;
+
+    return `
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <clipPath id="disc-${size}">
+          <circle cx="${cx}" cy="${cy}" r="${r}" />
+        </clipPath>
+      </defs>
+      <!-- Dark base disc -->
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="${dark}" />
+      <g clip-path="url(#disc-${size})">
+        <!-- Lit half: right for waxing, left for waning -->
+        <rect x="${waning ? 0 : cx}" y="0" width="${r}" height="${size}" fill="${color}" opacity="0.92"/>
+        <!-- Terminator ellipse centred at the disc centre, coloured to add/remove light -->
+        <ellipse cx="${cx}" cy="${cy}" rx="${termRx}" ry="${r}" fill="${termFill}" opacity="0.92"/>
+      </g>
+      <!-- Rim -->
+      <circle cx="${cx}" cy="${cy}" r="${r - 0.5}" fill="none" stroke="${color}" stroke-width="0.8" opacity="0.45"/>
+    </svg>`;
+}
+
+// ── Sky diagram ───────────────────────────────────────────────────────────────────
+
+/** Render the sky arc diagram showing all three moons' positions */
+/** Interpolate between two hex colours. t=0 → c1, t=1 → c2 */
+function lerpColor(c1, c2, t) {
+    const r1 = parseInt(c1.slice(1,3),16), g1 = parseInt(c1.slice(3,5),16), b1 = parseInt(c1.slice(5,7),16);
+    const r2 = parseInt(c2.slice(1,3),16), g2 = parseInt(c2.slice(3,5),16), b2 = parseInt(c2.slice(5,7),16);
+    const r = Math.round(r1 + (r2-r1)*t), g = Math.round(g1 + (g2-g1)*t), b = Math.round(b1 + (b2-b1)*t);
+    return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+function renderSkyDiagram(moons, hour = 0) {
+    const W = 400, H = 180;
+    const cx = W / 2, cy = H * 0.85;  // horizon centre
+    const R  = H * 0.78;              // sky arc radius
+
+    // ── Sky colour by time of day ──────────────────────────────────────────
+    // Oram day = 28 hours. We interpolate between key colour stops.
+    const h = hour;
+    let skyTop, skyBottom, isDay;
+    if (h >= 7 && h < 11) {
+        const t = (h - 7) / 4; // dawn → morning
+        skyTop    = lerpColor('#4a2060', '#1a6db5', t);
+        skyBottom = lerpColor('#e8844a', '#87ceeb', t);
+        isDay = t > 0.3;
+    } else if (h >= 11 && h < 17) {
+        skyTop    = '#1a6db5'; skyBottom = '#87ceeb'; isDay = true;
+    } else if (h >= 17 && h < 21) {
+        const t = (h - 17) / 4; // afternoon → dusk
+        skyTop    = lerpColor('#1a6db5', '#2d1035', t);
+        skyBottom = lerpColor('#87ceeb', '#c0583a', t);
+        isDay = t < 0.6;
+    } else {
+        skyTop = '#0a0818'; skyBottom = '#1a1535'; isDay = false;
+    }
+
+    function lonToXY(lon) {
+        const angle = (90 - lon) * Math.PI / 180;  // radians, 0=right, π=left
+        return {
+            x: cx + R * Math.cos(angle),
+            y: cy - R * Math.sin(angle)
+        };
+    }
+
+    // Build SVG
+    let svg = `<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
+                    style="max-width:${W}px; margin:0 auto; display:block;">
+      <defs>
+        <linearGradient id="sky-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="${skyTop}"/>
+          <stop offset="100%" stop-color="${skyBottom}"/>
+        </linearGradient>
+        <clipPath id="sky-clip">
+          <path d="M0,${cy} A${R*1.15},${R*1.15} 0 0,1 ${W},${cy} L${W},${H} L0,${H} Z"/>
+        </clipPath>
+      </defs>
+
+      <!-- Sky background -->
+      <path d="M0,${cy} A${R*1.15},${R*1.15} 0 0,1 ${W},${cy} L${W},${H} L0,${H} Z"
+            fill="url(#sky-grad)" />
+
+      <!-- Stars: only visible at night -->
+      ${!isDay ? [...Array(30)].map(() => {
+          const sx = Math.random()*W, sy = Math.random()*cy*0.9;
+          const sr = Math.random()*1.2+0.3, so = Math.random()*0.6+0.3;
+          return `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${sr.toFixed(1)}" fill="white" opacity="${so.toFixed(2)}"/>`;
+      }).join('') : ''}
+
+      <!-- Ground -->
+      <rect x="0" y="${cy}" width="${W}" height="${H - cy}" fill="#2d1810" opacity="0.8"/>
+
+      <!-- Horizon line -->
+      <line x1="0" y1="${cy}" x2="${W}" y2="${cy}" stroke="rgba(255,215,0,0.3)" stroke-width="1"/>
+
+      <!-- Arc guides: every 30° -->
+      ${[-90,-60,-30,0,30,60,90].map(deg => {
+          const pt = lonToXY(deg);
+          const label = deg === 0 ? 'Meridian' : (deg < 0 ? `${Math.abs(deg)}°W` : `${deg}°E`);
+          const onHorizon = Math.abs(deg) === 90;
+          return `
+            <line x1="${pt.x.toFixed(1)}" y1="${cy}" x2="${pt.x.toFixed(1)}" y2="${pt.y.toFixed(1)}"
+                  stroke="rgba(255,215,0,0.08)" stroke-width="1" stroke-dasharray="2,4"/>
+            <text x="${pt.x.toFixed(1)}" y="${(cy+14).toFixed(1)}" text-anchor="middle"
+                  font-size="9" fill="rgba(255,215,0,0.5)" font-family="sans-serif">
+              ${onHorizon ? (deg < 0 ? 'W' : 'E') : label}
+            </text>`;
+      }).join('')}
+
+      <!-- Sky arc -->
+      <path d="M${lonToXY(-90).x},${cy} A${R},${R} 0 0,1 ${lonToXY(90).x},${cy}"
+            fill="none" stroke="rgba(255,215,0,0.2)" stroke-width="1"/>`;
+
+    // Draw each moon
+    moons.forEach(m => {
+        if (!m.sky.night) return; // only draw above-horizon moons on the arc
+        const pt   = lonToXY(m.lon);
+        const mR   = m.moon === 'Kuu' ? 14 : m.moon === 'Isa' ? 10 : 8;
+        const illum = illumination(m.phase);
+
+        // Phase-shaded circle — same two-half logic as moonSVG()
+        const waning  = m.phase > 0.5;
+        const gibbous = waning ? (m.phase < 0.75) : (m.phase > 0.25);
+        const termRx  = Math.abs(Math.cos(m.phase * 2 * Math.PI)) * mR;
+        const termFill = gibbous ? m.color : '#101025';
+
+        svg += `
+        <g transform="translate(${pt.x.toFixed(1)},${pt.y.toFixed(1)})">
+          <defs>
+            <clipPath id="mc-${m.moon}">
+              <circle r="${mR}"/>
+            </clipPath>
+          </defs>
+          <!-- Dark base -->
+          <circle r="${mR}" fill="#101025"/>
+          <!-- Lit half + terminator -->
+          <g clip-path="url(#mc-${m.moon})">
+            <rect x="${waning ? -mR : 0}" y="${-mR}" width="${mR}" height="${mR*2}" fill="${m.color}" opacity="0.9"/>
+            <ellipse cx="0" cy="0" rx="${termRx}" ry="${mR}" fill="${termFill}" opacity="0.9"/>
+          </g>
+          <!-- Rim glow -->
+          <circle r="${mR}" fill="none" stroke="${m.color}" stroke-width="1.5" opacity="0.6"/>
+          <!-- Label -->
+          <text y="${mR + 11}" text-anchor="middle" font-size="9" fill="${m.color}"
+                font-family="sans-serif" font-weight="bold">${m.moon}</text>
+        </g>`;
+    });
+
+    // Draw below-horizon moons as dim icons near the horizon
+    moons.forEach(m => {
+        if (m.sky.night) return;
+        const clampedLon = Math.max(-170, Math.min(170, m.lon));
+        const pt = lonToXY(clampedLon > 0 ? 80 : -80);
+        const mR = 6;
+        svg += `
+        <g transform="translate(${(m.lon > 0 ? W - 30 : 30)},${cy + 18})" opacity="0.3">
+          <circle r="${mR}" fill="${m.color}"/>
+          <text y="${mR + 9}" text-anchor="middle" font-size="8" fill="${m.color}"
+                font-family="sans-serif">${m.moon}</text>
+        </g>`;
+    });
+
+    svg += `
+      <!-- Direction labels -->
+      <text x="12" y="${cy - 5}" font-size="10" fill="rgba(255,215,0,0.6)" font-family="sans-serif">West</text>
+      <text x="${W - 12}" y="${cy - 5}" font-size="10" fill="rgba(255,215,0,0.6)"
+            font-family="sans-serif" text-anchor="end">East</text>
+      <text x="${cx}" y="14" font-size="9" fill="rgba(255,255,255,0.4)"
+            font-family="sans-serif" text-anchor="middle">Zenith</text>
+    </svg>`;
+
+    return svg;
+}
+
+// ── Next event finder ─────────────────────────────────────────────────────────────
+
+function findNextEvent(fractDay, type) {
+    // type: 'darknight' | 'brightnight'
+    const KUU  = MOON_TRACKER.KUU.period;
+    const ISA  = MOON_TRACKER.ISA.period;
+    const UMAN = MOON_TRACKER.UMAN.period;
+    const tol  = 1.0;
+
+    for (let d = Math.ceil(fractDay) + 1; d < fractDay + 5000; d++) {
+        const phK = ((d + 1) / KUU)  % 1;
+        const phI = ((d + 1) / ISA)  % 1;
+        const phU = ((d + 1) / UMAN) % 1;
+
+        const dK = Math.min(phK, 1 - phK) * KUU;
+        const dI = Math.min(phI, 1 - phI) * ISA;
+        const dU = Math.min(phU, 1 - phU) * UMAN;
+
+        if (type === 'darknight') {
+            if (dK <= tol && dI <= tol && dU <= tol) return d;
+        } else {
+            const fK = Math.abs(phK - 0.5) * KUU;
+            const fI = Math.abs(phI - 0.5) * ISA;
+            const fU = Math.abs(phU - 0.5) * UMAN;
+            if (fK <= tol && fI <= tol && fU <= tol) return d;
+        }
+    }
+    return null;
+}
+
+function absDateToCalendar(absDay) {
+    const d = Math.floor(absDay);
+    const year = Math.floor((d - 1) / 396) + 1;
+    const doy  = ((d - 1) % 396) + 1;
+    const tq   = Math.floor((doy - 1) / 33) + 1;
+    const day  = ((doy - 1) % 33) + 1;
+    return { year, tq, day, tqName: MOON_TRACKER.TQ_NAMES[tq] || `TQ${tq}` };
+}
+
+// ── Main display function ─────────────────────────────────────────────────────────
+
+async function displayMoonTracker() {
+    const el = getContainer();
+    if (!el) return;
+
+    el.innerHTML = `
+        <button class="back-button" id="back-to-home-btn">← Back to Home</button>
+        <div class="calendar-container">
+            <h1>Moon Tracker</h1>
+            <p class="welcome-subtitle">Moon positions, phases &amp; sky visibility for any moment on Oram</p>
+
+            <div class="converter-panel moon-tracker-input-panel">
+                <h3>🌙 Enter Date &amp; Time</h3>
+
+                <div class="moon-tracker-inputs">
+                    <div class="moon-input-group">
+                        <label for="mt-year">Year (AWB)</label>
+                        <input type="number" id="mt-year" min="1" value="14887" class="mt-input"/>
+                    </div>
+                    <div class="moon-input-group">
+                        <label for="mt-tq">Tritquarter</label>
+                        <select id="mt-tq" class="mt-input">
+                            ${MOON_TRACKER.TQ_NAMES.slice(1).map((n,i) =>
+                                `<option value="${i+1}">${n} (TQ ${i+1})</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="moon-input-group">
+                        <label for="mt-day">Day (1–33)</label>
+                        <select id="mt-day" class="mt-input">
+                            ${Array.from({length:33},(_,i)=>
+                                `<option value="${i+1}">${i+1}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="moon-input-group">
+                        <label for="mt-hour">Hour (0–27)</label>
+                        <select id="mt-hour" class="mt-input">
+                            ${Array.from({length:28},(_,i)=>{
+                                const h = i.toString().padStart(2,'0');
+                                const label = i === 0 ? '00:00 — Midnight'
+                                            : i === 7  ? '07:00 — Dawn'
+                                            : i === 14 ? '14:00 — Midday'
+                                            : i === 21 ? '21:00 — Dusk'
+                                            : `${h}:00`;
+                                return `<option value="${i}">${label}</option>`;
+                            }).join('')}
+                        </select>
+                    </div>
+                </div>
+
+                <button class="convert-btn" id="mt-calculate-btn">Calculate Moon Positions</button>
+            </div>
+
+            <div id="mt-results" style="display:none;">
+                <div id="mt-sky-diagram" class="moon-sky-diagram"></div>
+                <div class="moon-tracker-cards" id="mt-moon-cards"></div>
+                <div class="moon-tracker-events" id="mt-events"></div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+
+    document.getElementById('mt-calculate-btn').addEventListener('click', () => {
+        const year = parseInt(document.getElementById('mt-year').value)   || 1;
+        const tq   = parseInt(document.getElementById('mt-tq').value)     || 1;
+        const day  = parseInt(document.getElementById('mt-day').value)    || 1;
+        const hour = parseInt(document.getElementById('mt-hour').value);
+
+        const fractDay = calendarToFractionalDay(year, tq, day, hour);
+        // Is it currently day or night at Stragos? (used for badge labels)
+        const isDay = hour >= 7 && hour < 21;
+
+        // Compute moon data
+        const moonsData = Object.values(MOON_TRACKER).filter(m => m.period).map(m => {
+            const phase = moonPhase(fractDay, m.period);
+            const lon   = moonLongitude(phase, hour);
+            const sky   = skyPosition(lon, phase);
+            const illum = illumination(phase);
+            const dNew  = distFromNew(phase, m.period);
+            const dFull = distFromFull(phase, m.period);
+            return { moon: m.name, period: m.period, color: m.color, radius: m.radius,
+                     phase, lon, sky, illum, dNew, dFull };
+        });
+
+        // Next events
+        const nextDark   = findNextEvent(fractDay, 'darknight');
+        const nextBright = findNextEvent(fractDay, 'brightnight');
+
+        // Sky diagram
+        document.getElementById('mt-sky-diagram').innerHTML = renderSkyDiagram(moonsData, hour);
+
+        // Moon cards
+        document.getElementById('mt-moon-cards').innerHTML = moonsData.map(m => {
+            const pct  = (m.illum * 100).toFixed(0);
+            const east = m.lon > 0;
+            const absDeg = Math.abs(m.lon).toFixed(1);
+            const compassDir = Math.abs(m.lon) < 5 ? 'at Meridian' :
+                               east ? `${absDeg}° East` : `${absDeg}° West`;
+
+            // Phase arc SVG (small)
+            const phaseSvg = moonSVG(m.phase, m.color, 52);
+
+            return `
+            <div class="moon-card moon-card-named--${m.moon.toLowerCase()}" data-moon="${m.moon}" style="--moon-color:${m.color}">
+                <div class="moon-card-header" style="color:${m.color}; background: linear-gradient(135deg, color-mix(in srgb, ${m.color} 15%, #2d1a2d) 0%, #1a0f1a 100%);">
+                    ${m.moon}
+                    <span class="moon-card-badge ${m.sky.night ? (isDay ? 'badge--daysky' : 'badge--night') : 'badge--day'}">
+                        ${m.sky.night ? (isDay ? '☀ Day Sky' : '★ Night Sky') : '⊙ Below Horizon'}
+                    </span>
+                </div>
+                <div class="moon-card-body">
+                    <div class="moon-phase-icon">${phaseSvg}</div>
+                    <div class="moon-card-details">
+                        <div class="moon-stat">
+                            <span class="moon-stat-label">Phase</span>
+                            <span class="moon-stat-value">${phaseName(m.phase)}</span>
+                        </div>
+                        <div class="moon-stat">
+                            <span class="moon-stat-label">Illumination</span>
+                            <span class="moon-stat-value">
+                                <span class="illum-bar-wrap">
+                                    <span class="illum-bar" style="width:${pct}%; background:${m.color}"></span>
+                                </span>
+                                ${pct}%
+                            </span>
+                        </div>
+                        <div class="moon-stat">
+                            <span class="moon-stat-label">Sky Position</span>
+                            <span class="moon-stat-value">${compassDir}</span>
+                        </div>
+                        <div class="moon-stat">
+                            <span class="moon-stat-label">Visibility</span>
+                            <span class="moon-stat-value moon-visibility">${m.sky.desc}</span>
+                        </div>
+                        <div class="moon-stat">
+                            <span class="moon-stat-label">Days to New Moon</span>
+                            <span class="moon-stat-value">${m.dNew.toFixed(2)} days</span>
+                        </div>
+                        <div class="moon-stat">
+                            <span class="moon-stat-label">Days to Full Moon</span>
+                            <span class="moon-stat-value">${m.dFull.toFixed(2)} days</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="moon-card-footer">
+                    Period: ${m.period.toFixed(4)} days
+                    &nbsp;·&nbsp;
+                    Phase: ${(m.phase * 100).toFixed(1)}%
+                </div>
+            </div>`;
+        }).join('');
+
+        // Events panel
+        let eventsHtml = '<div class="moon-events-title">Upcoming Events</div><div class="moon-events-grid">';
+
+        if (nextDark !== null) {
+            const dc = absDateToCalendar(nextDark);
+            const daysAway = nextDark - Math.floor(fractDay);
+            eventsHtml += `
+            <div class="moon-event moon-event--dark">
+                <div class="moon-event-icon">🌑🌑🌑</div>
+                <div class="moon-event-label">Next Darknight</div>
+                <div class="moon-event-date">${dc.tqName} ${dc.day}, Year ${dc.year} AWB</div>
+                <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
+            </div>`;
+        }
+
+        if (nextBright !== null) {
+            const bc = absDateToCalendar(nextBright);
+            const daysAway = nextBright - Math.floor(fractDay);
+            eventsHtml += `
+            <div class="moon-event moon-event--bright">
+                <div class="moon-event-icon">🌕🌕🌕</div>
+                <div class="moon-event-label">Next Brightnight</div>
+                <div class="moon-event-date">${bc.tqName} ${bc.day}, Year ${bc.year} AWB</div>
+                <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
+            </div>`;
+        }
+
+        eventsHtml += '</div>';
+        document.getElementById('mt-events').innerHTML = eventsHtml;
+        document.getElementById('mt-results').style.display = 'block';
+        document.getElementById('mt-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+}
