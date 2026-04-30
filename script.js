@@ -2120,6 +2120,36 @@ async function generateShareImage(characterName, goesBy, proclamation, portraitU
 // 13. World Map
 // =================================================================================
 
+// Convert lat/lon (decimal degrees) to % position on the flat Inkarnate map
+// using Mollweide projection + calibrated overlay alignment constants.
+function mollweideForward(lat, lon) {
+    const phi = lat * Math.PI / 180;
+    let theta = phi;
+    for (let i = 0; i < 100; i++) {
+        const denom = 2 + 2 * Math.cos(2 * theta);
+        if (Math.abs(denom) < 1e-10) break;
+        const delta = (2 * theta + Math.sin(2 * theta) - Math.PI * Math.sin(phi)) / denom;
+        theta -= delta;
+        if (Math.abs(delta) < 1e-12) break;
+    }
+    const ny = (1 - Math.sin(theta)) / 2;
+    const nx = 0.5 + (lon / 180) * (0.5 * Math.cos(theta));
+    return { nx, ny };
+}
+
+function cityLatLonToMapPercent(lat, lon) {
+    const FLAT_W = 2048, FLAT_H = 1536, GLOBE_H = 1281;
+    const OV_X = -2.5, OV_Y = 7.0, OV_SCALE = 1.17;
+    const { nx, ny } = mollweideForward(lat, lon);
+    const gw = FLAT_W * OV_SCALE;
+    const gh = gw * (GLOBE_H / 1921);
+    const gl = (FLAT_W - gw) / 2 + OV_X * FLAT_W / 100;
+    const gt = (FLAT_H - gh) / 2 + OV_Y * FLAT_H / 100;
+    const mapX = ((gl + nx * gw) / FLAT_W) * 100;
+    const mapY = ((gt + ny * gh) / FLAT_H) * 100;
+    return { mapX, mapY };
+}
+
 async function displayWorldMap() {
     const el = getContainer();
     if (!el) return;
@@ -2244,6 +2274,39 @@ async function displayWorldMap() {
 
             overlayContainer.appendChild(svgEl);
         }
+
+        // ── Load and render city pins ────────────────────────────────────────
+        const mapWrapper = document.getElementById('map-wrapper');
+        const citiesSnap = await db.collection('cities').get();
+
+        citiesSnap.forEach(doc => {
+            const city = doc.data();
+            if (city.latitude == null || city.longitude == null) return;
+
+            const { mapX, mapY } = cityLatLonToMapPercent(city.latitude, city.longitude);
+            const isCapital = city.is_capital === true;
+
+            const pin = document.createElement('div');
+            pin.className = 'map-city-pin' + (isCapital ? ' map-city-pin--capital' : '');
+            pin.style.left = mapX + '%';
+            pin.style.top  = mapY + '%';
+
+            const dot = document.createElement('div');
+            dot.className = 'map-city-dot';
+
+            const label = document.createElement('div');
+            label.className = 'map-city-label';
+            label.textContent = city.city_name;
+
+            pin.appendChild(dot);
+            pin.appendChild(label);
+
+            pin.addEventListener('click', () => {
+                displayMoonTracker(doc.id);
+            });
+
+            mapWrapper.appendChild(pin);
+        });
 
     } catch (error) {
         console.error('Error loading world map:', error);
