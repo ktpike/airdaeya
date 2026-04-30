@@ -2748,24 +2748,46 @@ function renderSkyDiagram(moons, hour = 0) {
     const cx = W / 2, cy = H * 0.85;  // horizon centre
     const R  = H * 0.78;              // sky arc radius
 
-    // ── Sky colour by time of day ──────────────────────────────────────────
-    // Oram day = 28 hours. We interpolate between key colour stops.
-    const h = hour;
-    let skyTop, skyBottom, isDay;
-    if (h >= 7 && h < 11) {
-        const t = (h - 7) / 4; // dawn → morning
-        skyTop    = lerpColor('#4a2060', '#1a6db5', t);
-        skyBottom = lerpColor('#e8844a', '#87ceeb', t);
-        isDay = t > 0.3;
-    } else if (h >= 11 && h < 17) {
-        skyTop    = '#1a6db5'; skyBottom = '#87ceeb'; isDay = true;
-    } else if (h >= 17 && h < 21) {
-        const t = (h - 17) / 4; // afternoon → dusk
-        skyTop    = lerpColor('#1a6db5', '#2d1035', t);
-        skyBottom = lerpColor('#87ceeb', '#c0583a', t);
-        isDay = t < 0.6;
+    const h = ((hour % 28) + 28) % 28; // normalise to 0–28 (handles fractional)
+
+    let sunAmount; // 0 = full night, 1 = full day
+    if (h < 7) {
+        sunAmount = 0;                        // 0–6: night
+    } else if (h < 11) {
+        sunAmount = (h - 7) / 4;             // 7–10: dawn ramp up
+    } else if (h < 18) {
+        sunAmount = 1;                        // 11–17: full day
+    } else if (h < 21) {
+        sunAmount = 1 - (h - 18) / 3;        // 18–20: dusk ramp down
     } else {
-        skyTop = '#0a0818'; skyBottom = '#1a1535'; isDay = false;
+        sunAmount = 0;                        // 21–28: night
+    }
+
+    const isDay = sunAmount >= 0.4;  // mid-dawn counts as daytime for badges/stars
+
+    // Colour stops: night ↔ dawn/dusk ↔ day
+    const NIGHT_TOP    = '#0a0818';
+    const NIGHT_BOTTOM = '#1a1535';
+    const DAWN_TOP     = '#4a2060';
+    const DAWN_BOTTOM  = '#e8844a';
+    const DAY_TOP      = '#1a6db5';
+    const DAY_BOTTOM   = '#87ceeb';
+
+    let skyTop, skyBottom;
+    if (sunAmount <= 0) {
+        skyTop = NIGHT_TOP; skyBottom = NIGHT_BOTTOM;
+    } else if (sunAmount < 0.5) {
+        // Night → dawn
+        const t = sunAmount * 2;
+        skyTop    = lerpColor(NIGHT_TOP,    DAWN_TOP,    t);
+        skyBottom = lerpColor(NIGHT_BOTTOM, DAWN_BOTTOM, t);
+    } else if (sunAmount < 1) {
+        // Dawn → day  (or day → dusk on the way back down)
+        const t = (sunAmount - 0.5) * 2;
+        skyTop    = lerpColor(DAWN_TOP,    DAY_TOP,    t);
+        skyBottom = lerpColor(DAWN_BOTTOM, DAY_BOTTOM, t);
+    } else {
+        skyTop = DAY_TOP; skyBottom = DAY_BOTTOM;
     }
 
     function lonToXY(lon) {
@@ -2926,9 +2948,32 @@ function absDateToCalendar(absDay) {
 
 // ── Main display function ─────────────────────────────────────────────────────────
 
-async function displayMoonTracker() {
+async function displayMoonTracker(preselectedCityId = null) {
     const el = getContainer();
     if (!el) return;
+
+    // ── Load cities from Firebase ────────────────────────────────────────────
+    window._mtCityMap = { '__stragos__': { city_name: 'Stragos', longitude: 0, latitude: 0 } };
+    let cityOptions = '<option value="__stragos__">Stragos (Meridian)</option>';
+    try {
+        const citiesSnap = await db.collection('cities').get();
+        const cityDocs = [];
+        citiesSnap.forEach(d => {
+            const data = d.data();
+            if (data.latitude != null && data.longitude != null) {
+                cityDocs.push({ id: d.id, ...data });
+                window._mtCityMap[d.id] = { ...data };
+            }
+        });
+        cityDocs.sort((a, b) => (a.city_name || '').localeCompare(b.city_name || ''));
+        const defaultId = preselectedCityId || '__stragos__';
+        cityOptions = [{ id: '__stragos__', city_name: 'Stragos', is_capital: true }]
+            .concat(cityDocs)
+            .map(c => `<option value="${c.id}"${c.id === defaultId ? ' selected' : ''}>${c.city_name}${c.is_capital ? ' ★' : ''}</option>`)
+            .join('');
+    } catch (e) {
+        console.warn('Could not load cities:', e);
+    }
 
     el.innerHTML = `
         <button class="back-button" id="back-to-home-btn">← Back to Home</button>
@@ -2938,6 +2983,13 @@ async function displayMoonTracker() {
 
             <div class="converter-panel moon-tracker-input-panel">
                 <h3>🌙 Enter Date &amp; Time</h3>
+
+                <div class="mt-location-row">
+                    <div class="moon-input-group moon-input-group--location">
+                        <label for="mt-city">Location</label>
+                        <select id="mt-city" class="mt-input mt-input--location">${cityOptions}</select>
+                    </div>
+                </div>
 
                 <div class="moon-tracker-inputs">
                     <div class="moon-input-group">
@@ -2980,6 +3032,7 @@ async function displayMoonTracker() {
             </div>
 
             <div id="mt-results" style="display:none;">
+                <p class="mt-city-label" id="mt-city-label"></p>
                 <div id="mt-sky-diagram" class="moon-sky-diagram"></div>
                 <div class="moon-tracker-cards" id="mt-moon-cards"></div>
                 <div class="moon-tracker-events" id="mt-events"></div>
@@ -2996,13 +3049,39 @@ async function displayMoonTracker() {
         const hour = parseInt(document.getElementById('mt-hour').value);
 
         const fractDay = calendarToFractionalDay(year, tq, day, hour);
-        // Is it currently day or night at Stragos? (used for badge labels)
-        const isDay = hour >= 7 && hour < 21;
 
-        // Compute moon data
+        // ── City longitude offset ────────────────────────────────────────────
+        const cityId   = document.getElementById('mt-city') ? document.getElementById('mt-city').value : null;
+        const cityData = cityId && window._mtCityMap ? (window._mtCityMap[cityId] || { city_name: 'Stragos', longitude: 0 }) : { city_name: 'Stragos', longitude: 0 };
+        const cityLon  = parseFloat(cityData.longitude) || 0;
+
+        // Shift local hour by longitude: 360° = 28 Oram hours
+        const lonHourOffset = cityLon * (28 / 360);
+        const effectiveHour = ((hour + lonHourOffset) % 28 + 28) % 28;
+
+        console.log('[MoonTracker] city:', cityData.city_name, '| lon:', cityLon, '| offset hrs:', lonHourOffset.toFixed(2), '| input hour:', hour, '| effectiveHour:', effectiveHour.toFixed(2));
+
+        // ── isDay uses raw local hour (sky color = local time, not meridian-adjusted) ──
+        // Night: 0–6 and 22–28 | Dawn: 7–10 | Day: 11–17 | Dusk: 18–21
+        const _h   = hour;
+        const _sun = _h < 7  ? 0
+                   : _h < 11 ? (_h - 7) / 4
+                   : _h < 18 ? 1
+                   : _h < 21 ? 1 - (_h - 18) / 3
+                   : 0;
+        const isDay = _sun >= 0.4;  // matches renderSkyDiagram threshold
+
+        // Update city label if present
+        const locLabel = document.getElementById('mt-city-label');
+        if (locLabel) {
+            locLabel.textContent = '📍 ' + cityData.city_name +
+                (cityLon !== 0 ? ` (${cityLon > 0 ? '+' : ''}${cityLon.toFixed(2)}° lon)` : ' — Stragos Meridian');
+        }
+
+        // Compute moon data using effectiveHour for sky positions
         const moonsData = Object.values(MOON_TRACKER).filter(m => m.period).map(m => {
             const phase = moonPhase(fractDay, m.period);
-            const lon   = moonLongitude(phase, hour);
+            const lon   = moonLongitude(phase, effectiveHour);
             const sky   = skyPosition(lon, phase);
             const illum = illumination(phase);
             const dNew  = distFromNew(phase, m.period);
@@ -3033,8 +3112,8 @@ async function displayMoonTracker() {
             <div class="moon-card moon-card-named--${m.moon.toLowerCase()}" data-moon="${m.moon}" style="--moon-color:${m.color}">
                 <div class="moon-card-header" style="color:${m.color}; background: linear-gradient(135deg, color-mix(in srgb, ${m.color} 15%, #2d1a2d) 0%, #1a0f1a 100%);">
                     ${m.moon}
-                    <span class="moon-card-badge ${m.sky.night ? (isDay ? 'badge--daysky' : 'badge--night') : 'badge--day'}">
-                        ${m.sky.night ? (isDay ? '☀ Day Sky' : '★ Night Sky') : '⊙ Below Horizon'}
+                    <span class="moon-card-badge ${m.sky.night ? (isDay ? 'badge--daysky' : 'badge--night') : (isDay ? 'badge--daysky' : 'badge--day')}">
+                        ${m.sky.night ? (isDay ? '☀ Day Sky' : '★ Night Sky') : (isDay ? '☀ Day Sky' : '⊙ Below Horizon')}
                     </span>
                 </div>
                 <div class="moon-card-body">
