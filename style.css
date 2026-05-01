@@ -2091,6 +2091,57 @@ h1.character-detail-name {
     text-transform: uppercase;
 }
 
+/* ── Moon Tracker — lunar holiday banner ───────────────────────────────── */
+#mt-holiday {
+    margin-bottom: 20px;
+}
+
+.moon-holiday {
+    background: linear-gradient(135deg, #0d0820 0%, #1a1030 60%, #0d0820 100%);
+    border: 1px solid rgba(255, 215, 0, 0.35);
+    border-radius: 12px;
+    overflow: hidden;
+    padding: 0;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,215,0,0.08) inset;
+}
+
+.moon-holiday-header {
+    font-family: var(--font-display);
+    font-size: 1em;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #FFD700;
+    text-align: center;
+    padding: 14px 20px 12px;
+    background: linear-gradient(135deg, #2a1245 0%, #1a0a35 100%);
+    border-bottom: 1px solid rgba(255, 215, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.moon-holiday-icons {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.moon-holiday-icon {
+    display: flex;
+    align-items: center;
+}
+
+.moon-holiday-body {
+    font-family: var(--font-serif);
+    font-size: 0.95em;
+    color: rgba(224, 208, 192, 0.9);
+    text-align: center;
+    padding: 14px 22px 16px;
+    line-height: 1.6;
+}
+
 /* ── Moon Tracker — city label above sky diagram ───────────────────────── */
 .mt-city-label {
     font-family: var(--font-display);
