@@ -695,8 +695,12 @@ async function displayCharacterDetails(characterId) {
 
     try {
         // Fetch everything in parallel — including both sides of relationships
-        const [doc, appearancesSnap, booksSnap, allCharsSnap, calData, relsAsPerson1Snap, relsAsPerson2Snap, speciesSnap, subspeciesSnap] = await Promise.all([
-            db.collection('characters').doc(characterId).get(),
+        // Fetch character doc first so we know the birthplace city ID
+        const doc = await db.collection('characters').doc(characterId).get();
+        const preData = doc.exists ? doc.data() : {};
+        const birthplaceCityId = preData.c_birthplace || null;
+
+        const [appearancesSnap, booksSnap, allCharsSnap, calData, relsAsPerson1Snap, relsAsPerson2Snap, speciesSnap, subspeciesSnap, birthplaceCityDoc] = await Promise.all([
             db.collection('appearances').where('character_id', '==', characterId).get(),
             db.collection('books').get(),
             db.collection('characters').get(),
@@ -705,6 +709,9 @@ async function displayCharacterDetails(characterId) {
             db.collection('relationships').where('person2_id', '==', characterId).get(),
             db.collection('species').get(),
             db.collection('subspecies').get(),
+            birthplaceCityId
+                ? db.collection('cities').doc(birthplaceCityId).get()
+                : Promise.resolve(null),
         ]);
 
         if (!doc.exists) {
@@ -1039,6 +1046,21 @@ async function displayCharacterDetails(characterId) {
         // ── Build info-box rows ─────────────────────────────────────────────
         const infoRows = [];
 
+        // Appears In — first
+        if (bookAppearances.length) {
+            const bookItems = bookAppearances.map(({ book, role }) => {
+                const title = escHtml(book.book_title || book.title || 'Untitled');
+                const age = calcAgeAtStoryStart(book);
+                const ageNote = age !== null ? `<span class="book-age-note"> (age&nbsp;${age})</span>` : '';
+                const roleNote = role === 'POV' ? ' <span class="book-role-note">POV</span>' : '';
+                const linked = book.book_url
+                    ? `<a href="${addAppTracking(book.book_url, 'book_link')}" target="_blank" rel="noopener" class="info-book-link">${title}</a>`
+                    : title;
+                return `<span class="book-appearance-item">${linked}${roleNote}${ageNote}</span>`;
+            });
+            infoRows.push({ label: 'Appears In', html: bookItems.join('') });
+        }
+
         if (data.pronouns) {
             infoRows.push({ label: 'Pronouns', html: escHtml(data.pronouns) });
         }
@@ -1072,22 +1094,19 @@ async function displayCharacterDetails(characterId) {
         if (birthdayText) {
             infoRows.push({ label: 'Birthday', html: escHtml(birthdayText) });
         }
+
+        // Birthplace — after Birthday
+        if (birthplaceCityDoc && birthplaceCityDoc.exists) {
+            const bpCity = birthplaceCityDoc.data();
+            const bpName = escHtml(bpCity.city_name || birthplaceCityId);
+            const birthplaceHtml = bpCity.city_desc
+                ? `<a href="#" class="info-city-link" data-city-id="${escHtml(birthplaceCityId)}">${bpName}</a>`
+                : bpName;
+            infoRows.push({ label: 'Birthplace', html: birthplaceHtml });
+        }
+
         if (deathText) {
             infoRows.push({ label: 'Death', html: escHtml(deathText) });
-        }
-        // Relationships moved to the Family & Relationships box
-        if (bookAppearances.length) {
-            const bookItems = bookAppearances.map(({ book, role }) => {
-                const title = escHtml(book.book_title || book.title || 'Untitled');
-                const age = calcAgeAtStoryStart(book);
-                const ageNote = age !== null ? `<span class="book-age-note"> (age&nbsp;${age})</span>` : '';
-                const roleNote = role === 'POV' ? ' <span class="book-role-note">POV</span>' : '';
-                const linked = book.book_url
-                    ? `<a href="${addAppTracking(book.book_url, 'book_link')}" target="_blank" rel="noopener" class="info-book-link">${title}</a>`
-                    : title;
-                return `<span class="book-appearance-item">${linked}${roleNote}${ageNote}</span>`;
-            });
-            infoRows.push({ label: 'Appears In', html: bookItems.join('') });
         }
 
         // ── Build the name header ───────────────────────────────────────────
@@ -1266,6 +1285,14 @@ async function displayCharacterDetails(characterId) {
         // ── Wire up all char-name-link buttons (parents, relationships, etc.) 
         el.querySelectorAll('.char-name-link').forEach(btn => {
             btn.addEventListener('click', () => displayCharacterDetails(btn.dataset.charId));
+        });
+
+        // ── Wire up city links (birthplace) ─────────────────────────────────
+        el.querySelectorAll('.info-city-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                displayCityDetails(link.dataset.cityId, 'character', characterId);
+            });
         });
 
         // ── Wire up char-name-links added after initial render ───────────────
@@ -2328,14 +2355,18 @@ async function displayCountryDetails(countryId) {
     el.innerHTML = `<h2>Loading...</h2>`;
 
     try {
-        // ── Fetch country, books, country_appearances, and capital city ────
-        const [countryDoc, booksSnap, appearancesSnap, capitalSnap] = await Promise.all([
+        // ── Fetch country, books, country_appearances, capital city, and all cities ────
+        const [countryDoc, booksSnap, appearancesSnap, capitalSnap, allCitiesSnap] = await Promise.all([
             db.collection('countries').doc(countryId).get(),
             db.collection('books').get(),
             db.collection('country_appearances').where('ctry_id', '==', countryId).get(),
             db.collection('cities')
                 .where('ctry_id', '==', countryId)
                 .where('is_capital', '==', true)
+                .get(),
+            db.collection('cities')
+                .where('ctry_id', '==', countryId)
+                .where('is_capital', '==', false)
                 .get(),
         ]);
 
@@ -2355,6 +2386,16 @@ async function displayCountryDetails(countryId) {
 
         // ── Resolve capital city ─────────────────────────────────────────────
         const capitalCity = capitalSnap.empty ? null : capitalSnap.docs[0].data();
+
+        // ── Resolve non-capital cities, sorted alphabetically ───────────────
+        const otherCities = [];
+        allCitiesSnap.forEach(d => {
+            const cityData = d.data();
+            if (cityData.city_name) {
+                otherCities.push({ id: d.id, ...cityData });
+            }
+        });
+        otherCities.sort((a, b) => (a.city_name || '').localeCompare(b.city_name || ''));
 
         // ── Resolve linked books via country_appearances ────────────────────
         const linkedBooks = [];
@@ -2401,6 +2442,16 @@ async function displayCountryDetails(countryId) {
         if (capitalCity) {
             infoRows.push({ label: 'Capital', html: escHtml(capitalCity.city_name) });
         }
+        if (otherCities.length) {
+            const cityItems = otherCities.map(city => {
+                const name = escHtml(city.city_name);
+                if (city.city_desc) {
+                    return `<a href="#" class="info-city-link" data-city-id="${city.id}">${name}</a>`;
+                }
+                return name;
+            });
+            infoRows.push({ label: 'Cities', html: cityItems.join(', ') });
+        }
         if (linkedBooks.length) {
             const bookLinks = linkedBooks.map(book => {
                 const title = escHtml(book.book_title || 'Untitled');
@@ -2426,6 +2477,14 @@ async function displayCountryDetails(countryId) {
                 </dl>
             `;
             leftCol.appendChild(infoBox);
+
+            // ── Wire city detail links ───────────────────────────────────────
+            infoBox.querySelectorAll('.info-city-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    displayCityDetails(link.dataset.cityId, 'country', countryId);
+                });
+            });
         }
 
         // ── Description ──────────────────────────────────────────────────────
@@ -2440,6 +2499,130 @@ async function displayCountryDetails(countryId) {
             <h2>Error loading country details. Please try again.</h2>
         `;
         document.getElementById('back-to-map-btn').addEventListener('click', displayWorldMap);
+    }
+}
+
+
+// =================================================================================
+// 14b. City Details
+// =================================================================================
+
+async function displayCityDetails(cityId, fromPage, fromId) {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading...</h2>`;
+
+    // Determine back-button label and action based on caller
+    function goBack() {
+        if (fromPage === 'country' && fromId) {
+            displayCountryDetails(fromId);
+        } else if (fromPage === 'character' && fromId) {
+            displayCharacterDetails(fromId);
+        } else {
+            displayWorldMap();
+        }
+    }
+    const backLabel = fromPage === 'country'   ? '← Back to Country'
+                    : fromPage === 'character' ? '← Back to Character'
+                    : '← Back to Map';
+
+    try {
+        // ── Fetch city doc ───────────────────────────────────────────────────
+        const cityDoc = await db.collection('cities').doc(cityId).get();
+
+        if (!cityDoc.exists) {
+            el.innerHTML = `<button class="back-button" id="city-back-btn">${backLabel}</button><h2>City not found.</h2>`;
+            document.getElementById('city-back-btn').addEventListener('click', goBack);
+            return;
+        }
+
+        const data = cityDoc.data();
+        const countryId = data.ctry_id || null;
+
+        // ── Fetch country doc in parallel ────────────────────────────────────
+        const [countryDoc] = await Promise.all([
+            countryId ? db.collection('countries').doc(countryId).get() : Promise.resolve(null),
+        ]);
+
+        const countryData = (countryDoc && countryDoc.exists) ? countryDoc.data() : null;
+
+        // ── Escape helper ────────────────────────────────────────────────────
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Render shell ─────────────────────────────────────────────────────
+        el.innerHTML = `
+            <button class="back-button" id="city-back-btn">${backLabel}</button>
+            <h1 class="character-detail-name">${escHtml(data.city_name || cityId)}</h1>
+            <div class="character-detail-content">
+                <div class="character-detail-left" id="city-left"></div>
+                <div class="character-detail-description" id="city-right"></div>
+            </div>
+        `;
+        document.getElementById('city-back-btn').addEventListener('click', goBack);
+
+        const leftCol  = document.getElementById('city-left');
+        const rightCol = document.getElementById('city-right');
+
+        // ── Map image (if available) ─────────────────────────────────────────
+        if (data.map_path) {
+            const mapURL = await getStorageURL(data.map_path);
+            if (mapURL) {
+                const mapImg = document.createElement('img');
+                mapImg.src = mapURL;
+                mapImg.alt = `Map of ${data.city_name}`;
+                mapImg.classList.add('character-portrait-detail');
+                leftCol.appendChild(mapImg);
+            }
+        }
+
+        // ── Info box ─────────────────────────────────────────────────────────
+        const infoRows = [];
+
+        if (data.is_capital) {
+            infoRows.push({ label: 'Role', html: 'Capital City' });
+        }
+        if (countryData) {
+            const countryName = escHtml(countryData.ctry_name || countryId);
+            const countryHtml = `<a href="#" class="info-city-link" data-country-id="${escHtml(countryId)}">${countryName}</a>`;
+            infoRows.push({ label: 'Country', html: countryHtml });
+        }
+
+        if (infoRows.length) {
+            const infoBox = document.createElement('div');
+            infoBox.classList.add('character-info-box');
+            infoBox.innerHTML = `
+                <div class="character-info-box-header">Details</div>
+                <dl class="character-info-list">
+                    ${infoRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            leftCol.appendChild(infoBox);
+
+            // ── Wire country link ────────────────────────────────────────────
+            infoBox.querySelectorAll('[data-country-id]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    displayCountryDetails(link.dataset.countryId);
+                });
+            });
+        }
+
+        // ── Description ──────────────────────────────────────────────────────
+        if (data.city_desc) {
+            rightCol.insertAdjacentHTML('afterbegin', data.city_desc);
+        }
+
+    } catch (error) {
+        console.error('Error loading city details:', error);
+        el.innerHTML = `<button class="back-button" id="city-back-btn">${backLabel}</button><h2>Error loading city details. Please try again.</h2>`;
+        document.getElementById('city-back-btn').addEventListener('click', goBack);
     }
 }
 

@@ -526,20 +526,25 @@ body {
     margin-bottom: 0;
 }
 
-.info-book-link {
+.info-book-link,
+.info-city-link {
     color: var(--primary-color);
-    text-decoration: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: rgba(69,35,69,0.35);
     font-family: var(--font-serif);
     transition: opacity 0.2s ease;
 }
 
-.dark-mode .info-book-link {
+.dark-mode .info-book-link,
+.dark-mode .info-city-link {
     color: #FFD700;
+    text-decoration-color: rgba(255,215,0,0.4);
 }
 
-.info-book-link:hover {
+.info-book-link:hover,
+.info-city-link:hover {
     opacity: 0.75;
-    text-decoration: underline;
 }
 
 .book-role-note {
