@@ -3168,6 +3168,107 @@ function renderSkyDiagram(moons, hour = 0) {
  *
  * Rules are checked in the order listed. First match wins.
  */
+// ── Lunar Holiday Rules ────────────────────────────────────────────────────────────
+// Centralised rule table used by both detectLunarHoliday() and findNextHoliday().
+// Each entry: { name, test(kuu,isa,uman,helpers), description }
+// helpers = { isNew, isFull, isQuarter, isSickle }
+const HOLIDAY_RULES = [
+    {
+        name: "Assassin's Night",
+        test: (k, i, u, h) => h.isSickle(i) && h.isSickle(u),
+        description: 'Both Isa and Uman hang as sickles in the sky — daggers drawn in the dark.'
+    },
+    {
+        name: 'Half Night',
+        test: (k, i, u, h) => h.isNew(k) && h.isQuarter(i) && h.isQuarter(u),
+        description: 'Kuu is dark while Isa and Uman stand at their quarters, each half-lit.'
+    },
+    {
+        name: "Crafter's Moon",
+        test: (k, i, u, h) => (h.isNew(k) && h.isNew(i) && h.isQuarter(u)) ||
+                               (h.isNew(k) && h.isNew(u) && h.isQuarter(i)) ||
+                               (h.isNew(i) && h.isNew(u) && h.isQuarter(k)),
+        description: 'Two moons rest in darkness as the third shines at its quarter — a night for making things.'
+    },
+    {
+        name: "Fisher's Moon",
+        test: (k, i, u, h) => (h.isNew(k) && h.isNew(i) && h.isSickle(u)) ||
+                               (h.isNew(k) && h.isNew(u) && h.isSickle(i)) ||
+                               (h.isNew(i) && h.isNew(u) && h.isSickle(k)),
+        description: "Two moons are dark and the third curls like a fish hook — a fisher's moon."
+    },
+    {
+        name: 'Magic Moon',
+        test: (k, i, u, h) => h.isFull(k) && h.isNew(i) && h.isNew(u),
+        description: 'Kuu blazes full and alone while Isa and Uman sleep in shadow — a night of potent magic.'
+    },
+    {
+        name: "Demons' Night",
+        test: (k, i, u, h) => h.isFull(i) && h.isFull(u) && h.isNew(k),
+        description: 'Isa and Uman blaze together while Kuu goes dark — the night when demons walk freely.'
+    },
+    {
+        name: "Spirits' Night",
+        test: (k, i, u, h) => h.isFull(i) && h.isFull(u) && !h.isNew(k),
+        description: 'Isa and Uman are both full, and Kuu adds her glow — the veil grows thin.'
+    },
+    {
+        name: "Tricksters' Moon",
+        test: (k, i, u, h) => h.isFull(i) && h.isNew(k) && h.isNew(u),
+        description: 'Isa shines full and alone between two dark companions — mischief is afoot.'
+    },
+    {
+        name: "Warriors' Moon",
+        test: (k, i, u, h) => h.isNew(k) && h.isNew(i) && h.isFull(u),
+        description: "Uman blazes red and full while Kuu and Isa go dark — a warrior's hour."
+    },
+    {
+        name: "Lovers' Night",
+        test: (k, i, u, h) => h.isFull(k) && h.isFull(u) && h.isNew(i),
+        description: 'Kuu and Uman are both full while Isa hides — a night for lovers.'
+    },
+    {
+        name: "Hunters' Night",
+        test: (k, i, u, h) => h.isFull(k) && h.isFull(i) && h.isNew(u),
+        description: "Kuu and Isa are full while Uman goes dark — the hunter's moon."
+    },
+    {
+        name: "Widows' Night",
+        test: (k, i, u, h) => h.isFull(k) && h.isFull(u) && !h.isFull(i) && !h.isNew(i),
+        description: 'Kuu and Uman blaze full, but Isa lingers between — a night of mourning.'
+    },
+    {
+        name: "Newborns' Night",
+        test: (k, i, u, h) => h.isFull(k) && h.isFull(i) && !h.isFull(u) && !h.isNew(u),
+        description: 'Kuu and Isa shine together while Uman waxes — a night of new beginnings.'
+    },
+    {
+        name: "Farmers' Night",
+        test: (k, i, u, h) => h.isNew(k) && h.isNew(u) && !h.isFull(i) && !h.isNew(i),
+        description: 'Kuu and Uman sleep in darkness as Isa glows between them — a night for tending the earth.'
+    },
+    {
+        name: "Widowers' Moon",
+        test: (k, i, u, h) => h.isNew(k) && h.isNew(i) && !h.isFull(u) && !h.isNew(u),
+        description: "Kuu and Isa are dark while Uman burns between phases — a widower's moon."
+    },
+    {
+        name: 'Wishing Moon',
+        test: (k, i, u, h) => h.isNew(i) && h.isNew(u) && !h.isNew(k) && !h.isFull(k),
+        description: 'Isa and Uman go dark while Kuu lingers between — whisper your wish to her light.'
+    },
+];
+
+// Shared phase helpers — used by both detectLunarHoliday and findNextHoliday
+function _holidayHelpers(illumFn) {
+    return {
+        isNew:     m => illumFn(m) <  1,
+        isFull:    m => illumFn(m) >= 99,
+        isQuarter: m => illumFn(m) >= 49 && illumFn(m) <= 51,
+        isSickle:  m => illumFn(m) >= 1.5 && illumFn(m) < 3,
+    };
+}
+
 function detectLunarHoliday(moonsData) {
     const byName = {};
     for (const m of moonsData) byName[m.moon] = m;
@@ -3176,88 +3277,52 @@ function detectLunarHoliday(moonsData) {
     const uman = byName['Uman'];
     if (!kuu || !isa || !uman) return null;
 
-    const illumPct = m => m.illum * 100;
+    const h = _holidayHelpers(m => m.illum * 100);
+    const moonEntry = m => ({ phase: m.phase, color: m.color });
 
-    const isNew    = m => illumPct(m) <  1;
-    const isFull   = m => illumPct(m) >= 99;
-    const isQuarter= m => illumPct(m) >= 49 && illumPct(m) <= 51;
-    const isSickle = m => illumPct(m) >= 1.5 && illumPct(m) < 3;
+    for (const rule of HOLIDAY_RULES) {
+        if (rule.test(kuu, isa, uman, h)) {
+            return {
+                name: rule.name,
+                moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)],
+                description: rule.description
+            };
+        }
+    }
+    return null;
+}
 
-    // Helper: build the moons array [kuu, isa, uman] with phase + color for SVG rendering
-    const moonEntry = (m) => ({ phase: m.phase, color: m.color });
+// Find the next occurrence of a named holiday after fractDay.
+// Returns { absDay, calendar } or null.
+function findNextHoliday(fractDay, holidayName) {
+    const rule = HOLIDAY_RULES.find(r => r.name === holidayName);
+    if (!rule) return null;
 
-    // 1. Assassin's Night — both Isa and Uman are sickle-shaped
-    if (isSickle(isa) && isSickle(uman))
-        return { name: "Assassin's Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Both Isa and Uman hang as sickles in the sky — daggers drawn in the dark.' };
+    const KUU  = MOON_TRACKER.KUU.period;
+    const ISA  = MOON_TRACKER.ISA.period;
+    const UMAN = MOON_TRACKER.UMAN.period;
 
-    // 2. Half Night — Kuu is new, Isa and Uman are quarter moons
-    if (isNew(kuu) && isQuarter(isa) && isQuarter(uman))
-        return { name: 'Half Night', moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Kuu is dark while Isa and Uman stand at their quarters, each half-lit.' };
+    // Build phase helpers that work on raw illumination values (0–100 scale)
+    const h = _holidayHelpers(x => x);
 
-    // 3. Crafter's Moon — any 2 moons new, the other a quarter
-    if (isNew(kuu) && isNew(isa) && isQuarter(uman))
-        return { name: "Crafter's Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Two moons rest in darkness as the third shines at its quarter — a night for making things.' };
-    if (isNew(kuu) && isNew(uman) && isQuarter(isa))
-        return { name: "Crafter's Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Two moons rest in darkness as the third shines at its quarter — a night for making things.' };
-    if (isNew(isa) && isNew(uman) && isQuarter(kuu))
-        return { name: "Crafter's Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Two moons rest in darkness as the third shines at its quarter — a night for making things.' };
+    for (let d = Math.ceil(fractDay) + 1; d < fractDay + 20000; d++) {
+        const phK = ((d + 1) / KUU)  % 1;
+        const phI = ((d + 1) / ISA)  % 1;
+        const phU = ((d + 1) / UMAN) % 1;
 
-    // 4. Fisher's Moon — any 2 moons new, the other a sickle
-    if (isNew(kuu) && isNew(isa) && isSickle(uman))
-        return { name: "Fisher's Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: "Two moons are dark and the third curls like a fish hook — a fisher's moon." };
-    if (isNew(kuu) && isNew(uman) && isSickle(isa))
-        return { name: "Fisher's Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: "Two moons are dark and the third curls like a fish hook — a fisher's moon." };
-    if (isNew(isa) && isNew(uman) && isSickle(kuu))
-        return { name: "Fisher's Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: "Two moons are dark and the third curls like a fish hook — a fisher's moon." };
+        const ilK = illumination(phK) * 100;
+        const ilI = illumination(phI) * 100;
+        const ilU = illumination(phU) * 100;
 
-    // 5. Magic Moon — Kuu full, Isa and Uman new
-    if (isFull(kuu) && isNew(isa) && isNew(uman))
-        return { name: 'Magic Moon', moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Kuu blazes full and alone while Isa and Uman sleep in shadow — a night of potent magic.' };
+        // Wrap as plain objects with illum100 as the value passed to helpers
+        const kuu  = ilK;
+        const isa  = ilI;
+        const uman = ilU;
 
-    // 6. Demons' Night — Isa and Uman full, Kuu new
-    if (isFull(isa) && isFull(uman) && isNew(kuu))
-        return { name: "Demons' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Isa and Uman blaze together while Kuu goes dark — the night when demons walk freely.' };
-
-    // 7. Spirits' Night — Isa and Uman full, Kuu NOT new
-    if (isFull(isa) && isFull(uman) && !isNew(kuu))
-        return { name: "Spirits' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Isa and Uman are both full, and Kuu adds her glow — the veil grows thin.' };
-
-    // 8. Tricksters' Moon — Isa full, Kuu and Uman new
-    if (isFull(isa) && isNew(kuu) && isNew(uman))
-        return { name: "Tricksters' Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Isa shines full and alone between two dark companions — mischief is afoot.' };
-
-    // 9. Warriors' Moon — Kuu and Isa new, Uman full
-    if (isNew(kuu) && isNew(isa) && isFull(uman))
-        return { name: "Warriors' Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: "Uman blazes red and full while Kuu and Isa go dark — a warrior's hour." };
-
-    // 10. Lovers' Night — Kuu and Uman full, Isa new
-    if (isFull(kuu) && isFull(uman) && isNew(isa))
-        return { name: "Lovers' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Kuu and Uman are both full while Isa hides — a night for lovers.' };
-
-    // 11. Hunters' Night — Kuu and Isa full, Uman new
-    if (isFull(kuu) && isFull(isa) && isNew(uman))
-        return { name: "Hunters' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: "Kuu and Isa are full while Uman goes dark — the hunter's moon." };
-
-    // 12. Widows' Night — Kuu and Uman full, Isa NOT full or new
-    if (isFull(kuu) && isFull(uman) && !isFull(isa) && !isNew(isa))
-        return { name: "Widows' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Kuu and Uman blaze full, but Isa lingers between — a night of mourning.' };
-
-    // 13. Newborns' Night — Kuu and Isa full, Uman NOT full or new
-    if (isFull(kuu) && isFull(isa) && !isFull(uman) && !isNew(uman))
-        return { name: "Newborns' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Kuu and Isa shine together while Uman waxes — a night of new beginnings.' };
-
-    // 14. Farmers' Night — Kuu and Uman new, Isa NOT full or new
-    if (isNew(kuu) && isNew(uman) && !isFull(isa) && !isNew(isa))
-        return { name: "Farmers' Night", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Kuu and Uman sleep in darkness as Isa glows between them — a night for tending the earth.' };
-
-    // 15. Widowers' Moon — Kuu and Isa new, Uman NOT full or new
-    if (isNew(kuu) && isNew(isa) && !isFull(uman) && !isNew(uman))
-        return { name: "Widowers' Moon", moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: "Kuu and Isa are dark while Uman burns between phases — a widower's moon." };
-
-    // 16. Wishing Moon — Isa and Uman new, Kuu NOT new or full
-    if (isNew(isa) && isNew(uman) && !isNew(kuu) && !isFull(kuu))
-        return { name: 'Wishing Moon', moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)], description: 'Isa and Uman go dark while Kuu lingers between — whisper your wish to her light.' };
-
+        if (rule.test(kuu, isa, uman, h)) {
+            return { absDay: d, calendar: absDateToCalendar(d) };
+        }
+    }
     return null;
 }
 
@@ -3529,7 +3594,7 @@ async function displayMoonTracker(preselectedCityId = null) {
             holidayEl.style.display = 'none';
         }
 
-        // Events panel
+        // Events panel — Darknights & Brightnights
         let eventsHtml = '<div class="moon-events-title">Upcoming Events</div><div class="moon-events-grid">';
 
         if (nextDark !== null) {
@@ -3554,6 +3619,44 @@ async function displayMoonTracker(preselectedCityId = null) {
                 <div class="moon-event-date">${bc.tqName} ${bc.day}, Year ${bc.year} AWB</div>
                 <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
             </div>`;
+        }
+
+        eventsHtml += '</div>';
+
+        // Upcoming Lunar Holidays — find next occurrence of all 16 holidays
+        eventsHtml += '<div class="moon-events-title moon-events-title--holidays">Upcoming Lunar Holidays</div>';
+        eventsHtml += '<div class="moon-holidays-grid">';
+
+        const holidayResults = HOLIDAY_RULES.map(rule => {
+            const result = findNextHoliday(fractDay, rule.name);
+            return { name: rule.name, result };
+        });
+
+        // Sort by days away so nearest holidays appear first
+        holidayResults.sort((a, b) => {
+            const dA = a.result ? a.result.absDay : Infinity;
+            const dB = b.result ? b.result.absDay : Infinity;
+            return dA - dB;
+        });
+
+        for (const { name, result } of holidayResults) {
+            if (result) {
+                const { calendar: c, absDay } = result;
+                const daysAway = absDay - Math.floor(fractDay);
+                eventsHtml += `
+                <div class="moon-event moon-event--holiday">
+                    <div class="moon-event-label">${name}</div>
+                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${c.year} AWB</div>
+                    <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
+                </div>`;
+            } else {
+                eventsHtml += `
+                <div class="moon-event moon-event--holiday moon-event--holiday-none">
+                    <div class="moon-event-label">${name}</div>
+                    <div class="moon-event-date">Not found in range</div>
+                    <div class="moon-event-away">—</div>
+                </div>`;
+            }
         }
 
         eventsHtml += '</div>';
