@@ -3333,7 +3333,7 @@ function findNextEvent(fractDay, type) {
     const UMAN = MOON_TRACKER.UMAN.period;
     const tol  = 1.0;
 
-    for (let d = Math.ceil(fractDay) + 1; d < fractDay + 5000; d++) {
+    for (let d = Math.ceil(fractDay) + 1; d < fractDay + 20000; d++) {
         const phK = ((d + 1) / KUU)  % 1;
         const phI = ((d + 1) / ISA)  % 1;
         const phU = ((d + 1) / UMAN) % 1;
@@ -3594,31 +3594,34 @@ async function displayMoonTracker(preselectedCityId = null) {
             holidayEl.style.display = 'none';
         }
 
-        // Events panel — Darknights & Brightnights
+        // Events panel — Darknights & Brightnights (nearest first)
         let eventsHtml = '<div class="moon-events-title">Upcoming Events</div><div class="moon-events-grid">';
 
-        if (nextDark !== null) {
-            const dc = absDateToCalendar(nextDark);
-            const daysAway = nextDark - Math.floor(fractDay);
-            eventsHtml += `
-            <div class="moon-event moon-event--dark">
-                <div class="moon-event-icon">🌑🌑🌑</div>
-                <div class="moon-event-label">Next Darknight</div>
-                <div class="moon-event-date">${dc.tqName} ${dc.day}, Year ${dc.year} AWB</div>
-                <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
-            </div>`;
-        }
+        const bigEvents = [
+            nextDark   !== null ? { absDay: nextDark,   type: 'dark'   } : null,
+            nextBright !== null ? { absDay: nextBright, type: 'bright' } : null,
+        ].filter(Boolean).sort((a, b) => a.absDay - b.absDay);
 
-        if (nextBright !== null) {
-            const bc = absDateToCalendar(nextBright);
-            const daysAway = nextBright - Math.floor(fractDay);
-            eventsHtml += `
-            <div class="moon-event moon-event--bright">
-                <div class="moon-event-icon">🌕🌕🌕</div>
-                <div class="moon-event-label">Next Brightnight</div>
-                <div class="moon-event-date">${bc.tqName} ${bc.day}, Year ${bc.year} AWB</div>
-                <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
-            </div>`;
+        for (const ev of bigEvents) {
+            const c = absDateToCalendar(ev.absDay);
+            const daysAway = ev.absDay - Math.floor(fractDay);
+            if (ev.type === 'dark') {
+                eventsHtml += `
+                <div class="moon-event moon-event--dark">
+                    <div class="moon-event-icon">🌑🌑🌑</div>
+                    <div class="moon-event-label">Next Darknight</div>
+                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${c.year} AWB</div>
+                    <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
+                </div>`;
+            } else {
+                eventsHtml += `
+                <div class="moon-event moon-event--bright">
+                    <div class="moon-event-icon">🌕🌕🌕</div>
+                    <div class="moon-event-label">Next Brightnight</div>
+                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${c.year} AWB</div>
+                    <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
+                </div>`;
+            }
         }
 
         eventsHtml += '</div>';
