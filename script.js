@@ -214,6 +214,7 @@ function displayHomeScreen() {
         <p class="welcome-subtitle">Explore the vast lore of the Airdaeya universe!</p>
         <div class="home-buttons-wrap"><div class="home-buttons">
             <button id="view-characters-btn" class="action-button">Character List</button>
+            <button id="view-species-btn"    class="action-button">Species</button>
             <button id="view-calendar-btn"   class="action-button">Calendar Converter</button>
             <button id="start-quiz-btn"      class="action-button">Personality Quiz</button>
             <button id="view-map-btn"        class="action-button">World Map</button>
@@ -222,6 +223,7 @@ function displayHomeScreen() {
     `;
 
     document.getElementById('view-characters-btn').addEventListener('click', displayCharacterList);
+    document.getElementById('view-species-btn').addEventListener('click', displaySpeciesList);
     document.getElementById('view-calendar-btn').addEventListener('click', displayCalendarConverter);
     document.getElementById('start-quiz-btn').addEventListener('click', displayPersonalityQuiz);
     document.getElementById('view-map-btn').addEventListener('click', displayWorldMap);
@@ -1081,12 +1083,18 @@ async function displayCharacterDetails(characterId) {
                     console.log('[Species] ss.species_id:', ss.species_id, '-> parent:', speciesMap[ss.species_id]);
                     const parentSpecies = speciesMap[ss.species_id];
                     const speciesName = parentSpecies ? escHtml(parentSpecies.s_name) : '';
-                    return speciesName
-                        ? escHtml(ss.ss_name) + ' (' + speciesName + ')'
+                    const label = speciesName
+                        ? `${escHtml(ss.ss_name)} (${speciesName})`
                         : escHtml(ss.ss_name);
+                    // Link to the parent species detail page (which shows subspecies cards below)
+                    const targetSpeciesId = ss.species_id || null;
+                    return targetSpeciesId
+                        ? `<a href="#" class="info-species-link" data-species-id="${escHtml(targetSpeciesId)}">${label}</a>`
+                        : label;
                 } else {
                     const sp = speciesMap[sid];
-                    return sp ? escHtml(sp.s_name) : escHtml(sid);
+                    const label = sp ? escHtml(sp.s_name) : escHtml(sid);
+                    return `<a href="#" class="info-species-link" data-species-id="${escHtml(sid)}">${label}</a>`;
                 }
             });
             infoRows.push({ label: 'Species', html: speciesLabels.join(', ') });
@@ -1292,6 +1300,14 @@ async function displayCharacterDetails(characterId) {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 displayCityDetails(link.dataset.cityId, 'character', characterId);
+            });
+        });
+
+        // ── Wire up species links ────────────────────────────────────────────
+        el.querySelectorAll('.info-species-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                displaySpeciesDetails(link.dataset.speciesId, 'character', characterId);
             });
         });
 
@@ -2623,6 +2639,230 @@ async function displayCityDetails(cityId, fromPage, fromId) {
         console.error('Error loading city details:', error);
         el.innerHTML = `<button class="back-button" id="city-back-btn">${backLabel}</button><h2>Error loading city details. Please try again.</h2>`;
         document.getElementById('city-back-btn').addEventListener('click', goBack);
+    }
+}
+
+// =================================================================================
+// 16. Species List
+// =================================================================================
+
+async function displaySpeciesList() {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading species...</h2>`;
+
+    try {
+        const snap = await db.collection('species').get();
+
+        const speciesList = [];
+        snap.forEach(d => {
+            const data = { id: d.id, ...d.data() };
+            if (data.reveal === true) speciesList.push(data);
+        });
+        speciesList.sort((a, b) => (a.s_name || '').localeCompare(b.s_name || ''));
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        function stripHtml(html) {
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            return div.textContent || div.innerText || '';
+        }
+
+        el.innerHTML = `
+            <button class="back-button" id="species-list-back-btn">← Back to Home</button>
+            <h1>Species</h1>
+            <div class="character-list-grid" id="species-list-grid"></div>
+        `;
+        document.getElementById('species-list-back-btn').addEventListener('click', displayHomeScreen);
+
+        const grid = document.getElementById('species-list-grid');
+
+        if (speciesList.length === 0) {
+            grid.innerHTML = `<p>No species found.</p>`;
+            return;
+        }
+
+        speciesList.forEach(species => {
+            const item = document.createElement('div');
+            item.classList.add('character-list-item');
+            item.style.cursor = 'pointer';
+
+            const snippet = species.sp_description
+                ? escHtml(stripHtml(species.sp_description).slice(0, 120)) + (stripHtml(species.sp_description).length > 120 ? '…' : '')
+                : '';
+
+            item.innerHTML = `
+                <div class="species-list-text">
+                    <h3>${escHtml(species.s_name || species.id)}</h3>
+                    ${snippet ? `<p>${snippet}</p>` : ''}
+                </div>
+            `;
+            item.addEventListener('click', () => displaySpeciesDetails(species.id));
+            grid.appendChild(item);
+        });
+
+    } catch (err) {
+        console.error('Error loading species list:', err);
+        el.innerHTML = `
+            <button class="back-button" id="species-list-back-btn">← Back to Home</button>
+            <h2>Error loading species. Please try again.</h2>
+        `;
+        document.getElementById('species-list-back-btn').addEventListener('click', displayHomeScreen);
+    }
+}
+
+// =================================================================================
+// 17. Species Detail
+// =================================================================================
+
+async function displaySpeciesDetails(speciesId, fromPage, fromId) {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading...</h2>`;
+
+    function goBack() {
+        if (fromPage === 'character' && fromId) {
+            displayCharacterDetails(fromId);
+        } else {
+            displaySpeciesList();
+        }
+    }
+    const backLabel = fromPage === 'character' ? '← Back to Character' : '← Back to Species';
+
+    try {
+        const [speciesDoc, subspeciesSnap, worldsSnap] = await Promise.all([
+            db.collection('species').doc(speciesId).get(),
+            db.collection('subspecies').where('species_id', '==', speciesId).get(),
+            db.collection('worlds').get(),
+        ]);
+
+        if (!speciesDoc.exists) {
+            el.innerHTML = `<button class="back-button" id="sp-back-btn">${backLabel}</button><h2>Species not found.</h2>`;
+            document.getElementById('sp-back-btn').addEventListener('click', goBack);
+            return;
+        }
+
+        const data = { id: speciesDoc.id, ...speciesDoc.data() };
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Build world lookup map ────────────────────────────────────────────
+        const worldMap = {};
+        worldsSnap.forEach(d => {
+            const w = d.data();
+            worldMap[d.id] = w.world_name || d.id;
+            if (w.id && w.id !== d.id) worldMap[w.id] = w.world_name || d.id;
+        });
+
+        // ── Collect revealed subspecies ───────────────────────────────────────
+        const subspeciesList = [];
+        subspeciesSnap.forEach(d => {
+            const ssData = { id: d.id, ...d.data() };
+            if (ssData.reveal === true || ssData.reveal === 'true') subspeciesList.push(ssData);
+        });
+        subspeciesList.sort((a, b) => (a.ss_name || '').localeCompare(b.ss_name || ''));
+
+        // ── Render shell ─────────────────────────────────────────────────────
+        el.innerHTML = `
+            <button class="back-button" id="sp-back-btn">${backLabel}</button>
+            <h1 class="character-detail-name">${escHtml(data.s_name || speciesId)}</h1>
+            <div class="character-detail-content">
+                <div class="character-detail-left" id="sp-left"></div>
+                <div class="character-detail-description" id="sp-right"></div>
+            </div>
+            <div id="sp-subspecies"></div>
+        `;
+        document.getElementById('sp-back-btn').addEventListener('click', goBack);
+
+        const leftCol  = document.getElementById('sp-left');
+        const rightCol = document.getElementById('sp-right');
+        const ssSection = document.getElementById('sp-subspecies');
+
+        // ── Image (async, placeholder while loading) ─────────────────────────
+        const img = document.createElement('img');
+        img.alt = `Image of ${data.s_name}`;
+        img.classList.add('character-portrait-detail');
+        img.src = PLACEHOLDER_IMG_LARGE;
+        leftCol.appendChild(img);
+
+        if (data.s_image) {
+            getStorageURL(data.s_image).then(url => {
+                if (url) img.src = url;
+            });
+        }
+
+        // ── Details info box ─────────────────────────────────────────────────
+        const infoRows = [];
+        if (data.homeworld) infoRows.push({ label: 'World', html: escHtml(worldMap[data.homeworld] || data.homeworld) });
+        if (data.s_form)    infoRows.push({ label: 'Form',  html: escHtml(data.s_form) });
+
+        if (infoRows.length) {
+            const infoBox = document.createElement('div');
+            infoBox.classList.add('character-info-box');
+            infoBox.innerHTML = `
+                <div class="character-info-box-header">Species Details</div>
+                <dl class="character-info-list">
+                    ${infoRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            leftCol.appendChild(infoBox);
+        }
+
+        // ── Description ──────────────────────────────────────────────────────
+        if (data.sp_description) {
+            rightCol.insertAdjacentHTML('afterbegin', data.sp_description);
+        }
+
+        // ── Subspecies cards ─────────────────────────────────────────────────
+        if (subspeciesList.length > 0) {
+            ssSection.innerHTML = `<h2 class="species-subspecies-heading">Subspecies</h2>
+                <div class="species-subspecies-grid" id="ss-grid"></div>`;
+
+            const ssGrid = document.getElementById('ss-grid');
+            subspeciesList.forEach(ss => {
+                const card = document.createElement('div');
+                card.classList.add('species-subspecies-card', 'species-subspecies-card--wide');
+
+                // Image element (async load, placeholder while waiting)
+                const img = document.createElement('img');
+                img.alt = `Image of ${ss.ss_name || ss.id}`;
+                img.classList.add('species-subspecies-card-img');
+                img.src = PLACEHOLDER_IMG_LARGE;
+                if (ss.ss_image) {
+                    getStorageURL(ss.ss_image).then(url => { if (url) img.src = url; });
+                }
+
+                const imgWrap = document.createElement('div');
+                imgWrap.classList.add('species-subspecies-card-img-wrap');
+                imgWrap.appendChild(img);
+
+                const contentWrap = document.createElement('div');
+                contentWrap.classList.add('species-subspecies-card-content');
+                contentWrap.innerHTML = `
+                    <div class="species-subspecies-card-header">${escHtml(ss.ss_name || ss.id)}</div>
+                    <div class="species-subspecies-card-body">${ss.ss_desc ? ss.ss_desc : ''}</div>
+                `;
+
+                card.appendChild(imgWrap);
+                card.appendChild(contentWrap);
+                ssGrid.appendChild(card);
+            });
+        }
+
+    } catch (err) {
+        console.error('Error loading species details:', err);
+        el.innerHTML = `<button class="back-button" id="sp-back-btn">${backLabel}</button><h2>Error loading species. Please try again.</h2>`;
+        document.getElementById('sp-back-btn').addEventListener('click', goBack);
     }
 }
 
