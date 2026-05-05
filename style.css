@@ -2412,3 +2412,352 @@ h1.character-detail-name {
         height: 200px;
     }
 }
+
+/* =============================================================================
+   Ancestor Tree Panel
+   ============================================================================= */
+
+.ancestor-tree-panel {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    border: 1px solid rgba(69,35,69,0.2);
+    margin-top: 16px;
+    order: 2;
+}
+
+.dark-mode .ancestor-tree-panel {
+    border-color: rgba(255,215,0,0.2);
+}
+
+/* Header — matches character-family-box-header */
+.ancestor-tree-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    color: #FFD700;
+    font-family: var(--font-display);
+    font-size: 0.85em;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,215,0,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.ancestor-tree-toggle {
+    background: none;
+    border: none;
+    color: rgba(255,215,0,0.75);
+    font-size: 0.8em;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: transform 0.25s ease, color 0.2s ease;
+    transform: rotate(180deg); /* points down = collapsed */
+}
+
+.ancestor-tree-toggle--open {
+    transform: rotate(0deg); /* points up = expanded */
+}
+
+.ancestor-tree-header:hover .ancestor-tree-toggle {
+    color: #FFD700;
+}
+
+/* Body */
+.ancestor-tree-body {
+    background-color: var(--bg-color);
+    padding: 20px 16px 16px;
+    overflow-x: auto;
+}
+
+/* ── Tree structure: flat horizontal rows per generation ────────────── */
+
+.atree-generations {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;              /* We control spacing via margins on children */
+    padding: 0;
+    position: relative;
+}
+
+/* Label immediately precedes its .atree-gen — small gap between them */
+.atree-generations > .atree-gen-label {
+    margin-top: 32px;    /* space above label = gap between previous gen and this label */
+    margin-bottom: 6px;  /* tight gap between label and its nodes row */
+}
+
+/* No top margin on very first label */
+.atree-generations > .atree-gen-label:first-of-type {
+    margin-top: 8px;
+}
+
+/* Each .atree-gen row — vertical spacing between generations */
+.atree-generations > .atree-gen {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Gap between consecutive generation rows (where connector lines live).
+   Use + adjacent sibling so only gen→gen pairs get the gap,
+   never the svg→first-gen pair. */
+.atree-generations > .atree-gen + .atree-gen {
+    margin-top: 48px;
+}
+
+/* The SVG overlay sits on top of all rows and draws the connector lines */
+.atree-svg-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    z-index: 1;
+    overflow: visible;
+}
+
+/* Each generation row — just a container for the nodes.
+   The label is now a SIBLING element before this in the flex column,
+   so sub-tree growth inside here never displaces the label. */
+.atree-gen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+}
+
+/* Gen label — direct child of .atree-generations (the outer flex column).
+   Sits as its own row in the flex column, always immediately before
+   its corresponding .atree-gen. Never affected by node height changes. */
+.atree-gen-label {
+    font-family: var(--font-header);
+    font-size: 0.7em;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    opacity: 0.75;
+    text-align: center;
+    /* No bottom margin — gap on .atree-generations handles spacing */
+    padding-bottom: 4px;
+}
+
+.dark-mode .atree-gen-label {
+    color: rgba(195,177,133,0.55);
+}
+
+/* Nodes row — items bottom-align so unexpanded nodes (no sub-tree above)
+   sit flush with the base of nodes that have expanded sub-trees above them. */
+.atree-gen-nodes {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+/* Node wrapper — used when a sub-tree is attached above a node.
+   column layout keeps sub-tree above, node below, with a gap. */
+.atree-node-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
+}
+
+/* Sub-tree container sitting above its anchor node */
+.atree-subtree-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: max-content;
+    max-width: 100%;
+}
+
+/* Individual ancestor node — boxed card with name + dates stacked */
+.atree-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: var(--bg-color);
+    border: 1px solid rgba(69,35,69,0.25);
+    border-radius: 8px;
+    padding: 8px 14px 7px;
+    min-width: 120px;
+    max-width: 200px;
+    text-align: center;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.08);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    position: relative;
+    z-index: 2;
+}
+
+.atree-node:hover {
+    border-color: rgba(69,35,69,0.55);
+    box-shadow: 0 2px 10px rgba(69,35,69,0.15);
+}
+
+.dark-mode .atree-node {
+    border-color: rgba(255,215,0,0.22);
+    background: rgba(45,46,73,0.7);
+}
+
+.dark-mode .atree-node:hover {
+    border-color: rgba(255,215,0,0.5);
+    box-shadow: 0 2px 10px rgba(255,215,0,0.12);
+}
+
+/* Subject (root) node — slightly more prominent */
+.atree-node--root {
+    border-color: rgba(69,35,69,0.5);
+    border-width: 1.5px;
+    background: rgba(69,35,69,0.04);
+}
+
+.dark-mode .atree-node--root {
+    border-color: rgba(255,215,0,0.5);
+    background: rgba(255,215,0,0.05);
+}
+
+/* Father node — darker purple border */
+.atree-node--father {
+    border-color: rgba(69,35,69,0.7);
+    border-width: 1.5px;
+}
+
+.atree-node--father:hover {
+    border-color: rgba(69,35,69,0.9);
+}
+
+.dark-mode .atree-node--father {
+    border-color: rgba(255,215,0,0.65);
+}
+
+.dark-mode .atree-node--father:hover {
+    border-color: rgba(255,215,0,0.85);
+}
+
+/* Mother node — lighter purple border (default already light, just be explicit) */
+.atree-node--mother {
+    border-color: rgba(69,35,69,0.25);
+    border-width: 1px;
+}
+
+.dark-mode .atree-node--mother {
+    border-color: rgba(255,215,0,0.22);
+}
+
+/* Leaf node (no known parents) — slightly muted */
+.atree-node--leaf {
+    opacity: 0.82;
+}
+
+/* Name button — prominent, serif */
+.atree-name-btn {
+    font-family: var(--font-serif);
+    font-size: 0.97em;
+    font-weight: 400;
+    line-height: 1.25;
+    color: var(--primary-color);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: rgba(69,35,69,0.3);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+.dark-mode .atree-name-btn {
+    color: #c3b185;
+    text-decoration-color: rgba(195,177,133,0.35);
+}
+
+.atree-name-btn:hover {
+    opacity: 0.72;
+}
+
+/* Dates — smaller, italic, below the name */
+.atree-dates {
+    font-family: var(--font-serif);
+    font-size: 0.76em;
+    font-style: italic;
+    color: var(--text-secondary);
+    opacity: 0.8;
+    line-height: 1.2;
+    display: block;
+}
+
+.dark-mode .atree-dates {
+    color: rgba(195,177,133,0.6);
+}
+
+/* Node with expand button: needs relative positioning for the arrow */
+.atree-node--expandable {
+    position: relative;
+    padding-top: 18px; /* room for the arrow above the name */
+}
+
+/* Expand arrow — sits centered on the top border of the card, arrow only */
+.atree-expand-btn {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.7em;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    transition: color 0.15s ease, transform 0.15s ease;
+    z-index: 3;
+}
+
+.atree-expand-btn:hover {
+    color: var(--primary-color);
+    transform: translateX(-50%) scale(1.2);
+}
+
+.dark-mode .atree-expand-btn {
+    color: rgba(195,177,133,0.7);
+}
+
+.dark-mode .atree-expand-btn:hover {
+    color: #FFD700;
+    transform: translateX(-50%) scale(1.2);
+}
+
+.atree-expand-btn--open {
+    color: var(--primary-color);
+}
+
+.dark-mode .atree-expand-btn--open {
+    color: #FFD700;
+}
+
+.atree-expand-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+
+@media (max-width: 600px) {
+    .atree-node {
+        min-width: 95px;
+        padding: 6px 10px 5px;
+    }
+    .atree-name-btn {
+        font-size: 0.88em;
+    }
+    .atree-dates {
+        font-size: 0.72em;
+    }
+}

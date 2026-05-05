@@ -921,19 +921,44 @@ async function displayCharacterDetails(characterId) {
         // Sort by relationship type then name
         relationships.sort((a, b) => a.rType.localeCompare(b.rType) || (a.char.goes_by || a.char.name).localeCompare(b.char.goes_by || b.char.name));
 
-        // ── Resolve parent names from parent_ids ────────────────────────────
-        const parentEntries = [];
-        if (data.parent_ids && data.parent_ids.length) {
-            data.parent_ids.forEach(pid => {
-                const parent = characterMap[pid];
-                parentEntries.push({ charId: pid, char: parent || null });
-            });
+        // ── Helper: get revealed parent IDs from new mother_id/father_id fields ──────
+        // Falls back to legacy parent_ids for any docs not yet migrated.
+        // mother_reveal / father_reveal = false means that parent's identity is a spoiler
+        // and should be omitted from the family box and ancestor tree.
+        function getParentIds(charData) {
+            if (!charData) return [];
+            // New schema: mother_id / father_id with optional reveal flags
+            if (charData.mother_id || charData.father_id) {
+                const ids = [];
+                if (charData.father_id && charData.father_reveal !== false) ids.push(charData.father_id);
+                if (charData.mother_id && charData.mother_reveal !== false) ids.push(charData.mother_id);
+                return ids.filter(Boolean);
+            }
+            // Legacy fallback
+            return (charData.parent_ids || []).filter(Boolean);
         }
 
+        // Same as getParentIds but returns ALL parent IDs regardless of reveal
+        // (used for sibling/child matching where we need the full picture)
+        function getAllParentIds(charData) {
+            if (!charData) return [];
+            if (charData.mother_id || charData.father_id) {
+                return [charData.mother_id, charData.father_id].filter(Boolean);
+            }
+            return (charData.parent_ids || []).filter(Boolean);
+        }
+
+        // ── Resolve parent names from parent_ids ────────────────────────────
+        const parentEntries = [];
+        const revealedParentIds = getParentIds(data);
+        revealedParentIds.forEach(pid => {
+            const parent = characterMap[pid];
+            parentEntries.push({ charId: pid, char: parent || null });
+        });
+
         // ── Derive family: children and siblings grouped by shared parent(s) ────────
-        const myParentIds = new Set(
-            (data.parent_ids || []).filter(pid => pid && pid.trim())
-        );
+        // Use ALL parent IDs (including unrevealed) for sibling/child matching
+        const myParentIds = new Set(getAllParentIds(data).filter(pid => pid && pid.trim()));
 
         // Relationship records the current character is part of (both directions)
         const allRels = [
@@ -964,11 +989,21 @@ async function displayCharacterDetails(characterId) {
         const byName = (a, b) =>
             (a.char.goes_by || a.char.name).localeCompare(b.char.goes_by || b.char.name);
 
+        // Sort oldest to youngest by birth year, then tritquarter, then day
+        const byBirthDate = (a, b) => {
+            const ba = a.char.birthday || {}, bb = b.char.birthday || {};
+            const ya = parseInt(ba.year) || 0, yb = parseInt(bb.year) || 0;
+            if (ya !== yb) return ya - yb;
+            const ta = parseInt(ba.tritquarter) || 0, tb = parseInt(bb.tritquarter) || 0;
+            if (ta !== tb) return ta - tb;
+            return (parseInt(ba.day) || 0) - (parseInt(bb.day) || 0);
+        };
+
         // ── Children grouped by the set of other parent(s) ──────────────────────────
         const childGroupMap = new Map();
         Object.values(characterMap).forEach(other => {
             if (other.id === characterId) return;
-            const theirParents = new Set((other.parent_ids || []).filter(pid => pid && pid.trim()));
+            const theirParents = new Set(getAllParentIds(other).filter(pid => pid && pid.trim()));
             if (!theirParents.has(characterId)) return;
             const otherParentIds = [...theirParents].filter(pid => pid !== characterId).sort();
             const key = otherParentIds.join('|') || '__none__';
@@ -976,7 +1011,7 @@ async function displayCharacterDetails(characterId) {
             childGroupMap.get(key).children.push({ charId: other.id, char: other });
         });
         const childGroups = [...childGroupMap.values()];
-        childGroups.forEach(g => g.children.sort(byName));
+        childGroups.forEach(g => g.children.sort(byBirthDate));
         childGroups.sort((a, b) => {
             const na = a.otherParentIds.map(pid => (characterMap[pid] || {}).goes_by || (characterMap[pid] || {}).name || pid).join(', ');
             const nb = b.otherParentIds.map(pid => (characterMap[pid] || {}).goes_by || (characterMap[pid] || {}).name || pid).join(', ');
@@ -987,7 +1022,7 @@ async function displayCharacterDetails(characterId) {
         const sibGroupMap = new Map();
         Object.values(characterMap).forEach(other => {
             if (other.id === characterId) return;
-            const theirParents = new Set((other.parent_ids || []).filter(pid => pid && pid.trim()));
+            const theirParents = new Set(getAllParentIds(other).filter(pid => pid && pid.trim()));
             if (myParentIds.size === 0 || theirParents.size === 0) return;
             const shared = [...myParentIds].filter(pid => theirParents.has(pid)).sort();
             if (shared.length === 0) return;
@@ -998,14 +1033,6 @@ async function displayCharacterDetails(characterId) {
         });
         const siblingGroups = [...sibGroupMap.values()];
         // Sort siblings oldest to youngest by birth year, then tq, then day
-        const byBirthDate = (a, b) => {
-            const ba = a.char.birthday || {}, bb = b.char.birthday || {};
-            const ya = parseInt(ba.year) || 0, yb = parseInt(bb.year) || 0;
-            if (ya !== yb) return ya - yb;
-            const ta = parseInt(ba.tritquarter) || 0, tb = parseInt(bb.tritquarter) || 0;
-            if (ta !== tb) return ta - tb;
-            return (parseInt(ba.day) || 0) - (parseInt(bb.day) || 0);
-        };
         siblingGroups.forEach(g => g.members.sort(byBirthDate));
 
         // ── html-safe helper ────────────────────────────────────────────────
@@ -1288,6 +1315,482 @@ async function displayCharacterDetails(characterId) {
             desc.appendChild(familyBox);
         }
 
+        // ── Ancestor Tree panel ─────────────────────────────────────────
+        // Show only if this character has at least one known parent
+        if (getParentIds(data).length || getAllParentIds(data).length) {
+            const treePanel = document.createElement('div');
+            treePanel.classList.add('ancestor-tree-panel');
+            treePanel.innerHTML = `
+                <div class="ancestor-tree-header">
+                    <span>Ancestor Tree</span>
+                    <button class="ancestor-tree-toggle" aria-expanded="false" aria-label="Expand ancestor tree">\u25b2</button>
+                </div>
+                <div class="ancestor-tree-body" style="display:none;">
+                    <div class="ancestor-tree-root"></div>
+                </div>`;
+            desc.appendChild(treePanel);
+
+            const toggleBtn = treePanel.querySelector('.ancestor-tree-toggle');
+            const treeBody  = treePanel.querySelector('.ancestor-tree-body');
+            const treeRoot  = treePanel.querySelector('.ancestor-tree-root');
+            let   treeBuilt = false;
+
+            // ── Node data structure ──────────────────────────────────────────
+            // Each node: { id, char, parents: [], _key, _expanded, _subTree }
+            // _expanded: whether user has opened this node's branch
+            // _subTree:  cached sub-tree node (2 more generations) once fetched
+
+            // Unique key counter — resets each full rebuild
+            let _keyCounter = 0;
+            function mkKey(id) { return id + '_' + (_keyCounter++); }
+
+            // Build node tree up to maxDepth generations deep from charId
+            function buildNodes(charId, charData, depth, maxDepth, parentRole) {
+                const node = { id: charId, char: charData, parents: [], _key: mkKey(charId),
+                               _expanded: false, _subTree: null, _parentRole: parentRole || null };
+                if (depth >= maxDepth) return node;
+                const char = charData;
+                // Father first (left), mother second (right) for new schema
+                if (char && (char.father_id || char.mother_id)) {
+                    if (char.father_id && char.father_reveal !== false) {
+                        node.parents.push(buildNodes(char.father_id, characterMap[char.father_id] || null, depth + 1, maxDepth, 'father'));
+                    }
+                    if (char.mother_id && char.mother_reveal !== false) {
+                        node.parents.push(buildNodes(char.mother_id, characterMap[char.mother_id] || null, depth + 1, maxDepth, 'mother'));
+                    }
+                } else {
+                    // Legacy fallback
+                    const pids = getParentIds(charData).filter(Boolean);
+                    pids.forEach(pid => {
+                        node.parents.push(buildNodes(pid, characterMap[pid] || null, depth + 1, maxDepth, null));
+                    });
+                }
+                return node;
+            }
+
+            // ── Generation label ─────────────────────────────────────────────
+            function genLabel(d) {
+                if (d === 0) return 'Subject';
+                if (d === 1) return 'Parents';
+                if (d === 2) return 'Grandparents';
+                if (d === 3) return 'Great-Grandparents';
+                const ordinals = ['','','','','2nd','3rd','4th','5th','6th','7th','8th','9th','10th'];
+                const ord = ordinals[d] || `${d - 2}th`;
+                return `${ord} Great-Grandparents`;
+            }
+
+            // ── Render one node card's inner HTML ────────────────────────────
+            function nodeCardHTML(node, depthFromRoot) {
+                const char  = node.char;
+                const label = char ? escHtml(char.goes_by || char.name) : escHtml(node.id);
+                const birthYear = char && char.birthday && char.birthday.year ? parseInt(char.birthday.year) : null;
+                const showDeath = char && char.death_date && char.death_date.year && !isSpoilerDeath(char);
+                const deathYear = showDeath ? parseInt(char.death_date.year) : null;
+                let dateStr = '';
+                if (birthYear && deathYear) dateStr = `${birthYear.toLocaleString()}\u2013${deathYear.toLocaleString()}`;
+                else if (birthYear)          dateStr = `b.\u00a0${birthYear.toLocaleString()}`;
+                const dateHtml  = dateStr ? `<span class="atree-dates">${dateStr}</span>` : '';
+                const isRoot    = depthFromRoot === 0;
+                const isLeaf    = !char || getAllParentIds(char).length === 0;
+                const rootClass = isRoot ? ' atree-node--root' : '';
+                const leafClass = isLeaf  ? ' atree-node--leaf' : '';
+                const roleClass = node._parentRole === 'father' ? ' atree-node--father'
+                                : node._parentRole === 'mother' ? ' atree-node--mother' : '';
+                // Expandable: leaf in the tree but has parents in DB
+                const canExpand = node.parents.length === 0 && char && getAllParentIds(char).length > 0;
+                // Arrow sits at the TOP of the card, centered on the top border
+                const expandBtn = canExpand
+                    ? `<button class="atree-expand-btn ${node._expanded ? 'atree-expand-btn--open' : ''}"
+                           data-node-key="${escHtml(node._key)}"
+                           title="${node._expanded ? 'Collapse ancestors' : 'Expand ancestors'}"
+                       >${node._expanded ? '\u25bc' : '\u25b2'}</button>`
+                    : '';  // arrow only — no text
+                return `<div class="atree-node${rootClass}${leafClass}${roleClass}${canExpand ? ' atree-node--expandable' : ''}" data-node-key="${escHtml(node._key)}">
+                    ${expandBtn}
+                    <button class="atree-name-btn char-name-link" data-char-id="${escHtml(node.id)}">${label}</button>
+                    ${dateHtml}
+                </div>`;
+            }
+
+            // ── Collect flat generation arrays from a node tree ──────────────
+            function collectGenerations(rootNode) {
+                const gens = [];
+                function walk(node, d) {
+                    if (!gens[d]) gens[d] = [];
+                    gens[d].push(node);
+                    node.parents.forEach(p => walk(p, d + 1));
+                }
+                walk(rootNode, 0);
+                return gens;
+            }
+
+            // ── Render one mini-tree (used for root tree + each sub-tree) ────
+            // showLabels param kept for compatibility but sub-trees now also show labels
+            // depthOffset: added to depth index to get the correct gen label
+            function renderMiniTree(rootNode, depthOffset, showLabels) {
+                const isSynthetic = rootNode.id === '__synthetic__';
+                const gens    = collectGenerations(rootNode);
+                const maxD    = gens.length - 1;
+                // Always show labels (root tree and sub-trees) so every generation
+                // is clearly identified and spacing is consistent throughout.
+                let html      = '<div class="atree-generations"><svg class="atree-svg-overlay" aria-hidden="true"></svg>';
+                for (let d = maxD; d >= 0; d--) {
+                    if (isSynthetic && d === 0) continue;
+                    const nodes = gens[d];
+                    const labelD = isSynthetic ? d + depthOffset - 1 : d + depthOffset;
+                    html += `<div class="atree-gen" data-depth="${d}" data-abs-depth="${labelD}">
+                        <div class="atree-gen-nodes">`;
+                    nodes.forEach(n => { html += nodeCardHTML(n, d === 0 && !isSynthetic ? depthOffset : -1); });
+                    html += '</div></div>';
+                }
+                html += '</div>';
+                return html;
+            }
+
+            // ── SVG connector drawing for one .atree-generations block ───────
+            function drawConnectors(genWrap, rootNode) {
+                const svg = genWrap.querySelector(':scope > .atree-svg-overlay');
+                if (!svg) return;
+                const wRect = genWrap.getBoundingClientRect();
+                svg.setAttribute('width',   wRect.width);
+                svg.setAttribute('height',  wRect.height);
+                svg.setAttribute('viewBox', `0 0 ${wRect.width} ${wRect.height}`);
+                svg.innerHTML = '';
+
+                const isDark    = document.body.classList.contains('dark-mode');
+                const lineColor = isDark ? 'rgba(255,215,0,0.4)' : 'rgba(69,35,69,0.4)';
+
+                function cx(el)  { const r = el.getBoundingClientRect(); return r.left + r.width / 2 - wRect.left; }
+                function top(el) { return el.getBoundingClientRect().top    - wRect.top; }
+                function bot(el) { return el.getBoundingClientRect().bottom - wRect.top; }
+
+                function mkLine(x1, y1, x2, y2) {
+                    const el = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    el.setAttribute('x1', x1); el.setAttribute('y1', y1);
+                    el.setAttribute('x2', x2); el.setAttribute('y2', y2);
+                    el.setAttribute('stroke', lineColor);
+                    el.setAttribute('stroke-width', '1.5');
+                    el.setAttribute('stroke-linecap', 'round');
+                    svg.appendChild(el);
+                }
+
+                function drawLines(node) {
+                    // Skip synthetic roots — they have no DOM element
+                    if (node.id === '__synthetic__') { node.parents.forEach(drawLines); return; }
+                    if (!node.parents.length) return;
+                    // If this node has an expanded sub-tree, its parent connections are
+                    // handled by drawSubTreeConnector — don't draw them here too.
+                    if (node._expanded && node._subTree) { return; }
+                    const childEl = genWrap.querySelector(`:scope > * [data-node-key="${node._key}"]`) ||
+                                    genWrap.querySelector(`[data-node-key="${node._key}"]`);
+                    if (!childEl) return;
+                    // Only look for parents that are direct siblings in this same genWrap
+                    // (not inside a nested sub-tree block)
+                    const realParents = node.parents.filter(p => p.id !== '__synthetic__');
+                    const parentEls = realParents
+                        .map(p => genWrap.querySelector(`[data-node-key="${p._key}"]`))
+                        .filter(Boolean);
+                    if (!parentEls.length) { node.parents.forEach(drawLines); return; }
+
+                    const childCx   = cx(childEl);
+                    const childTopY = top(childEl);
+                    const maxPBot   = Math.max(...parentEls.map(el => bot(el)));
+                    const barY      = maxPBot + (childTopY - maxPBot) * 0.5;
+
+                    mkLine(childCx, childTopY, childCx, barY);
+                    const pCxs = parentEls.map(el => cx(el));
+                    parentEls.forEach((pEl, i) => mkLine(pCxs[i], bot(pEl), pCxs[i], barY));
+                    const allX = [...pCxs, childCx];
+                    if (Math.min(...allX) < Math.max(...allX))
+                        mkLine(Math.min(...allX), barY, Math.max(...allX), barY);
+
+                    node.parents.forEach(drawLines);
+                }
+                drawLines(rootNode);
+            }
+
+            // ── Connect a sub-tree visually to its parent node ───────────────
+            // Draws a line from the top of parentNodeEl down to the sub-tree wrap.
+            // Draw connector from the bottom nodes of a sub-tree down to the expanded parent node.
+            // Draws into the sub-tree's own atree-svg-overlay (which already covers the sub-tree block)
+            // using overflow:visible so lines can extend below the sub-tree into the gap.
+            function drawSubTreeConnector(parentNodeEl, subTreeWrap) {
+                const subGenWrap = subTreeWrap.querySelector('.atree-generations');
+                if (!subGenWrap) return;
+                const svg = subGenWrap.querySelector(':scope > .atree-svg-overlay');
+                if (!svg) return;
+
+                const isDark = document.body.classList.contains('dark-mode');
+                const color  = isDark ? 'rgba(255,215,0,0.4)' : 'rgba(69,35,69,0.4)';
+
+                // Find the bottom-most generation row — depth=0 nodes (the immediate parents)
+                const gens = subGenWrap.querySelectorAll(':scope > .atree-gen');
+                const bottomGen = gens[gens.length - 1];
+                if (!bottomGen) return;
+                const bottomNodes = bottomGen.querySelectorAll('.atree-node');
+                if (!bottomNodes.length) return;
+
+                // All coordinates relative to subGenWrap (same origin as the SVG)
+                const wRect = subGenWrap.getBoundingClientRect();
+                const pRect = parentNodeEl.getBoundingClientRect();
+
+                const pCx  = pRect.left + pRect.width / 2 - wRect.left;
+                const pTopY = pRect.top - wRect.top;  // will be positive (node is below subGenWrap)
+
+                const bottomCxs = [...bottomNodes].map(n => {
+                    const r = n.getBoundingClientRect();
+                    return r.left + r.width / 2 - wRect.left;
+                });
+                const bottomBots = [...bottomNodes].map(n => n.getBoundingClientRect().bottom - wRect.top);
+                const maxBot = Math.max(...bottomBots);
+
+                const barY = maxBot + (pTopY - maxBot) * 0.5;
+
+                function mkL(x1, y1, x2, y2) {
+                    const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+                    l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+                    l.setAttribute('stroke', color);
+                    l.setAttribute('stroke-width', '1.5');
+                    l.setAttribute('stroke-linecap', 'round');
+                    svg.appendChild(l);
+                }
+
+                // Lines down from each bottom node to the bar
+                bottomCxs.forEach((bx, i) => mkL(bx, bottomBots[i], bx, barY));
+                // Horizontal bar spanning bottom nodes and child
+                const allX = [...bottomCxs, pCx];
+                if (Math.min(...allX) < Math.max(...allX))
+                    mkL(Math.min(...allX), barY, Math.max(...allX), barY);
+                // Line from bar down to parent node top
+                mkL(pCx, barY, pCx, pTopY);
+            }
+
+            // ── Refresh generation row labels after expand/collapse ─────────
+            // Each .atree-gen in the root mini-tree already has its label.
+            // Sub-trees have no labels. We also need to ensure the root tree's
+            // gen labels sit directly above their nodes row (not floating).
+            // This is handled purely in CSS — the label is the first child of
+            // .atree-gen, and nodes flex-end-align within their row.
+
+            // ── Master redraw: redraws all SVG connectors in the tree ────────
+            function redrawAllConnectors() {
+                // Root tree connectors (only lines within the root .atree-generations block)
+                const rootGenWrap = treeRoot.querySelector(':scope > .atree-generations');
+                if (rootGenWrap) drawConnectors(rootGenWrap, rootTreeNode);
+
+                // Recursively walk every node in the entire tree (root + all sub-trees),
+                // redrawing sub-tree internals and sub-tree-to-parent connectors at every level.
+                function walkAllNodes(node) {
+                    if (node._expanded && node._subTree) {
+                        const nodeEl = treeRoot.querySelector(`[data-node-key="${node._key}"]`);
+                        const subWrap = nodeEl ? nodeEl.closest('.atree-node-wrap')
+                                                       .querySelector('.atree-subtree-wrap') : null;
+                        if (subWrap) {
+                            const subGenWrap = subWrap.querySelector('.atree-generations');
+                            if (subGenWrap) drawConnectors(subGenWrap, node._subTree);
+                            drawSubTreeConnector(nodeEl, subWrap);
+                            // Walk all nodes inside this sub-tree for any further expansions
+                            walkTree(node._subTree);
+                        }
+                    }
+                    node.parents.forEach(walkAllNodes);
+                }
+
+                // Walk a sub-tree's node graph (synthetic root + its parents recursively)
+                function walkTree(treeNode) {
+                    if (treeNode.id !== '__synthetic__') walkAllNodes(treeNode);
+                    treeNode.parents.forEach(p => walkTree(p));
+                }
+
+                walkAllNodes(rootTreeNode);
+            }
+
+            // ── Wire up interactive buttons after any DOM update ─────────────
+            function wireButtons(container) {
+                container.querySelectorAll('.atree-name-btn').forEach(btn => {
+                    btn.addEventListener('click', () => displayCharacterDetails(btn.dataset.charId));
+                });
+                container.querySelectorAll('.atree-expand-btn').forEach(btn => {
+                    btn.addEventListener('click', () => handleExpand(btn.dataset.nodeKey));
+                });
+            }
+
+            // ── Fetch ancestors 2 levels deep from a char, populating characterMap ──
+            async function fetchAncestors(charId, levelsLeft) {
+                const char = characterMap[charId];
+                if (!char) return;
+                const allPids = getAllParentIds(char);
+                const pids = allPids.filter(pid => !characterMap[pid]);
+                if (!pids.length) {
+                    if (levelsLeft > 1) {
+                        await Promise.all(allPids.map(pid => fetchAncestors(pid, levelsLeft - 1)));
+                    }
+                    return;
+                }
+                await Promise.all(pids.map(async pid => {
+                    try {
+                        const snap = await db.collection('characters').doc(pid).get();
+                        if (snap.exists) characterMap[pid] = { id: pid, ...snap.data() };
+                    } catch(e) {}
+                }));
+                if (levelsLeft > 1) {
+                    await Promise.all(allPids.map(pid => fetchAncestors(pid, levelsLeft - 1)));
+                }
+            }
+
+            // ── Find a node anywhere in the tree by _key ─────────────────────
+            function findNode(node, key) {
+                if (node._key === key) return node;
+                for (const p of node.parents) {
+                    const found = findNode(p, key);
+                    if (found) return found;
+                }
+                if (node._subTree) {
+                    const found = findNode(node._subTree, key);
+                    if (found) return found;
+                }
+                return null;
+            }
+
+            // ── Handle expand/collapse of a node ────────────────────────────
+            async function handleExpand(nodeKey) {
+                const node = findNode(rootTreeNode, nodeKey);
+                if (!node) return;
+
+                // Find the node's wrapper element
+                const nodeEl  = treeRoot.querySelector(`[data-node-key="${nodeKey}"]`);
+                if (!nodeEl) return;
+
+                // Toggle collapse if already expanded
+                if (node._expanded) {
+                    node._expanded = false;
+                    const wrap = nodeEl.closest('.atree-node-wrap');
+                    const subWrap = wrap ? wrap.querySelector('.atree-subtree-wrap') : null;
+                    if (subWrap) subWrap.style.display = 'none';
+                    // Update button
+                    const btn = nodeEl.querySelector('.atree-expand-btn');
+                    if (btn) {
+                        btn.textContent = '\u25b2';
+                        btn.classList.remove('atree-expand-btn--open');
+                        btn.title = 'Expand ancestors';
+                    }
+                    requestAnimationFrame(() => requestAnimationFrame(redrawAllConnectors));
+                    return;
+                }
+
+                // Show loading state
+                const btn = nodeEl.querySelector('.atree-expand-btn');
+                if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+                // Fetch 2 levels of ancestors if not cached
+                if (!node._subTree) {
+                    await fetchAncestors(node.id, 2);
+                    // Build a synthetic root whose children ARE the parents of this node.
+                    // We skip depth-0 (the node itself) to avoid duplicating it in the sub-tree.
+                    const char = characterMap[node.id] || node.char;
+                    // Synthetic root: invisible, just a container for the parent nodes
+                    const syntheticRoot = { id: '__synthetic__', char: null, parents: [],
+                                            _key: mkKey('__syn__'), _expanded: false, _subTree: null };
+                    // Father first (left), mother second (right)
+                    if (char && (char.father_id || char.mother_id)) {
+                        if (char.father_id && char.father_reveal !== false) {
+                            syntheticRoot.parents.push(buildNodes(char.father_id, characterMap[char.father_id] || null, 0, 1, 'father'));
+                        }
+                        if (char.mother_id && char.mother_reveal !== false) {
+                            syntheticRoot.parents.push(buildNodes(char.mother_id, characterMap[char.mother_id] || null, 0, 1, 'mother'));
+                        }
+                    } else {
+                        const pids = getParentIds(char).filter(Boolean);
+                        pids.forEach(pid => {
+                            syntheticRoot.parents.push(buildNodes(pid, characterMap[pid] || null, 0, 1, null));
+                        });
+                    }
+                    node._subTree = syntheticRoot;
+                }
+
+                node._expanded = true;
+
+                // Find or create a wrap element for this node so sub-tree sits above it.
+                // Only reuse an existing .atree-node-wrap if it is the DIRECT parent of nodeEl.
+                let wrap = null;
+                if (nodeEl.parentNode && nodeEl.parentNode.classList &&
+                    nodeEl.parentNode.classList.contains('atree-node-wrap')) {
+                    wrap = nodeEl.parentNode;
+                }
+                if (!wrap) {
+                    wrap = document.createElement('div');
+                    wrap.classList.add('atree-node-wrap');
+                    nodeEl.parentNode.insertBefore(wrap, nodeEl);
+                    wrap.appendChild(nodeEl);
+                }
+
+                // Find or create sub-tree container
+                let subWrap = wrap.querySelector('.atree-subtree-wrap');
+                if (!subWrap) {
+                    subWrap = document.createElement('div');
+                    subWrap.classList.add('atree-subtree-wrap');
+                    wrap.insertBefore(subWrap, nodeEl);
+                }
+
+                // Depth offset: how many generations above root is this node?
+                function nodeDepth(n, target, d) {
+                    if (n._key === target._key) return d;
+                    for (const p of n.parents) { const r = nodeDepth(p, target, d + 1); if (r !== -1) return r; }
+                    // Sub-tree synthetic root is at the same depth as the expanded node's parents
+                    if (n._subTree) { const r = nodeDepth(n._subTree, target, d + 1); if (r !== -1) return r; }
+                    return -1;
+                }
+                const thisDepth = nodeDepth(rootTreeNode, node, 0);
+                const subDepthOffset = thisDepth + 1; // parents of this node
+
+                subWrap.innerHTML = renderMiniTree(node._subTree, subDepthOffset, false);
+                subWrap.style.display = '';
+                wireButtons(subWrap);
+
+                // Update button state
+                const newBtn = nodeEl.querySelector('.atree-expand-btn');
+                if (newBtn) {
+                    newBtn.disabled = false;
+                    newBtn.textContent = '\u25bc';
+                    newBtn.classList.add('atree-expand-btn--open');
+                    newBtn.title = 'Collapse ancestors';
+                }
+
+                requestAnimationFrame(() => requestAnimationFrame(redrawAllConnectors));
+            }
+
+            // ── Root tree node (3 generations: subject + parents + grandparents) ──
+            let rootTreeNode = null;
+
+            function buildAndRenderTree() {
+                if (treeBuilt) return;
+                treeBuilt = true;
+                _keyCounter = 0;
+                rootTreeNode = buildNodes(characterId, data, 0, 2); // depth 0,1,2 = 3 gens
+                const html = renderMiniTree(rootTreeNode, 0, true);
+                treeRoot.innerHTML = html;
+                wireButtons(treeRoot);
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                    const genWrap = treeRoot.querySelector('.atree-generations');
+                    if (genWrap) drawConnectors(genWrap, rootTreeNode);
+                }));
+            }
+
+            toggleBtn.addEventListener('click', () => {
+                const open = treeBody.style.display !== 'none';
+                if (open) {
+                    treeBody.style.display = 'none';
+                    toggleBtn.setAttribute('aria-expanded', 'false');
+                    toggleBtn.classList.remove('ancestor-tree-toggle--open');
+                } else {
+                    treeBody.style.display = '';
+                    toggleBtn.setAttribute('aria-expanded', 'true');
+                    toggleBtn.classList.add('ancestor-tree-toggle--open');
+                    buildAndRenderTree();
+                }
+            });
+        }
         desc.insertAdjacentHTML('afterbegin', data.description || 'No description available.');
 
         // ── Wire up all char-name-link buttons (parents, relationships, etc.) 
@@ -2694,12 +3197,34 @@ async function displaySpeciesList() {
                 ? escHtml(stripHtml(species.sp_description).slice(0, 120)) + (stripHtml(species.sp_description).length > 120 ? '…' : '')
                 : '';
 
-            item.innerHTML = `
-                <div class="species-list-text">
-                    <h3>${escHtml(species.s_name || species.id)}</h3>
-                    ${snippet ? `<p>${snippet}</p>` : ''}
-                </div>
+            // Portrait image — mirrors character card pattern
+            const img = document.createElement('img');
+            img.alt = `Image of ${species.s_name || species.id}`;
+            img.classList.add('character-list-portrait');
+            img.src = PLACEHOLDER_IMG;
+
+            const speciesListPlaceholder = (species.s_form || '').toLowerCase() === 'umanid'
+                ? 'Species/placeholder_umanid.png'
+                : 'Species/placeholder_creature.png';
+
+            if (species.s_image) {
+                getStorageURL(species.s_image)
+                    .then(url => { if (url) img.src = url; })
+                    .catch(() => getStorageURL(speciesListPlaceholder).then(ph => { if (ph) img.src = ph; }));
+            } else {
+                getStorageURL(speciesListPlaceholder).then(ph => { if (ph) img.src = ph; });
+            }
+
+            item.appendChild(img);
+
+            const textDiv = document.createElement('div');
+            textDiv.classList.add('species-list-text');
+            textDiv.innerHTML = `
+                <h3>${escHtml(species.s_name || species.id)}</h3>
+                ${snippet ? `<p>${snippet}</p>` : ''}
             `;
+
+            item.appendChild(textDiv);
             item.addEventListener('click', () => displaySpeciesDetails(species.id));
             grid.appendChild(item);
         });
@@ -2790,10 +3315,17 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
         img.src = PLACEHOLDER_IMG_LARGE;
         leftCol.appendChild(img);
 
+        const speciesPlaceholderPath = (data.s_form || '').toLowerCase() === 'umanid'
+            ? 'Species/placeholder_umanid.png'
+            : 'Species/placeholder_creature.png';
+
         if (data.s_image) {
-            getStorageURL(data.s_image).then(url => {
-                if (url) img.src = url;
-            });
+            // Load real image; fall back to form-based placeholder on failure
+            getStorageURL(data.s_image)
+                .then(url => { if (url) img.src = url; })
+                .catch(() => getStorageURL(speciesPlaceholderPath).then(ph => { if (ph) img.src = ph; }));
+        } else {
+            getStorageURL(speciesPlaceholderPath).then(ph => { if (ph) img.src = ph; });
         }
 
         // ── Details info box ─────────────────────────────────────────────────
@@ -2833,13 +3365,22 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
                 const card = document.createElement('div');
                 card.classList.add('species-subspecies-card', 'species-subspecies-card--wide');
 
-                // Image element (async load, placeholder while waiting)
+                // Image element (async load, form-based placeholder while waiting)
                 const img = document.createElement('img');
                 img.alt = `Image of ${ss.ss_name || ss.id}`;
                 img.classList.add('species-subspecies-card-img');
                 img.src = PLACEHOLDER_IMG_LARGE;
+
+                const ssPlaceholderPath = (data.s_form || '').toLowerCase() === 'umanid'
+                    ? 'Species/placeholder_umanid.png'
+                    : 'Species/placeholder_creature.png';
+
                 if (ss.ss_image) {
-                    getStorageURL(ss.ss_image).then(url => { if (url) img.src = url; });
+                    getStorageURL(ss.ss_image)
+                        .then(url => { if (url) img.src = url; })
+                        .catch(() => getStorageURL(ssPlaceholderPath).then(ph => { if (ph) img.src = ph; }));
+                } else {
+                    getStorageURL(ssPlaceholderPath).then(ph => { if (ph) img.src = ph; });
                 }
 
                 const imgWrap = document.createElement('div');
