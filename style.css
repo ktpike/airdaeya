@@ -2761,3 +2761,248 @@ h1.character-detail-name {
         font-size: 0.72em;
     }
 }
+/* ═══════════════════════════════════════════════════════════════════
+   DESCENDANT TREE  v8  —  full replacement
+   ═══════════════════════════════════════════════════════════════════ */
+
+.descendant-tree-panel {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    border: 1px solid rgba(69,35,69,0.2);
+    margin-top: 16px;
+    order: 3;
+}
+.dark-mode .descendant-tree-panel { border-color: rgba(255,215,0,0.2); }
+
+.descendant-tree-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #6b3a6b 100%);
+    color: #FFD700;
+    font-family: var(--font-display);
+    font-size: 0.85em;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,215,0,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+}
+.descendant-tree-toggle {
+    background: none; border: none;
+    color: rgba(255,215,0,0.75);
+    font-size: 0.8em; cursor: pointer;
+    padding: 0 4px; line-height: 1;
+    transition: transform 0.25s ease, color 0.2s ease;
+    transform: rotate(0deg);
+}
+.descendant-tree-toggle--open { transform: rotate(180deg); }
+.descendant-tree-header:hover .descendant-tree-toggle { color: #FFD700; }
+
+.descendant-tree-body {
+    background-color: var(--bg-color);
+    padding: 20px 0 16px;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.descendant-tree-scroll {
+    display: flex;
+    justify-content: center;
+    min-width: max-content;
+    padding: 0 32px;
+}
+
+/* ── Root container ───────────────────────────────────────────────── */
+.descendant-tree-root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+}
+
+/* ── Root group ───────────────────────────────────────────────────── */
+.dtree-group--root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
+    position: relative;
+    width: 100%;
+}
+.dtree-group--root + .dtree-group--root {
+    margin-top: 48px;
+    border-top: 1px dashed rgba(69,35,69,0.12);
+    padding-top: 8px;
+}
+.dark-mode .dtree-group--root + .dtree-group--root { border-top-color: rgba(255,215,0,0.1); }
+
+/* Coupling row: subject + co-parents side-by-side (top-level groups only) */
+.dtree-coupling-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+
+/* Children row (used in both root and sub groups) */
+.dtree-children-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;   /* NO wrap — prevents siblings dropping to new rows */
+    justify-content: center;
+    align-items: flex-start;
+    gap: 10px;
+    overflow-x: visible; /* let the scroll wrapper handle overflow */
+}
+
+/* ── Child wrap ───────────────────────────────────────────────────── */
+/* Contains: .dtree-child-and-cops (horizontal) + optional .dtree-subtree */
+.dtree-child-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;     /* never squish; let parent scroll */
+}
+
+/* ── Child-and-cops row ───────────────────────────────────────────── */
+/* The child card + co-parent card(s) side by side */
+.dtree-child-and-cops {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+
+/* Co-parent stack: vertically stacks co-parent cards when a child
+   has multiple co-parent groups. Usually just one card. */
+.dtree-cop-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ── Subtree (expanded child's children) ─────────────────────────── */
+.dtree-subtree {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    width: max-content;
+    max-width: 100%;
+    margin-top: 0;
+}
+
+/* ── Sub-group (one per co-parent pairing inside a subtree) ────────── */
+.dtree-sub-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;            /* space between child-and-cops row and children row */
+    margin-top: 48px;     /* space above sub-group = connector line travel room */
+    position: relative;
+    width: 100%;
+}
+.dtree-sub-group + .dtree-sub-group {
+    border-top: 1px dashed rgba(69,35,69,0.12);
+    padding-top: 8px;
+    margin-top: 8px;
+}
+.dark-mode .dtree-sub-group + .dtree-sub-group { border-top-color: rgba(255,215,0,0.1); }
+
+/* ── Individual node card ─────────────────────────────────────────── */
+.dtree-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: var(--bg-color);
+    border: 1px solid rgba(69,35,69,0.25);
+    border-radius: 8px;
+    padding: 8px 14px 7px;
+    min-width: 120px;
+    max-width: 200px;
+    text-align: center;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.08);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    position: relative;
+    z-index: 2;
+    flex-shrink: 0;
+}
+.dtree-node:hover {
+    border-color: rgba(69,35,69,0.55);
+    box-shadow: 0 2px 10px rgba(69,35,69,0.15);
+}
+.dark-mode .dtree-node {
+    border-color: rgba(255,215,0,0.22);
+    background: rgba(45,46,73,0.7);
+}
+.dark-mode .dtree-node:hover {
+    border-color: rgba(255,215,0,0.5);
+    box-shadow: 0 2px 10px rgba(255,215,0,0.12);
+}
+
+/* Subject node (top-level page character, in .dtree-coupling-row) */
+.dtree-node--subject {
+    border-color: rgba(69,35,69,0.5);
+    border-width: 1.5px;
+    background: rgba(69,35,69,0.04);
+}
+.dark-mode .dtree-node--subject {
+    border-color: rgba(255,215,0,0.5);
+    background: rgba(255,215,0,0.05);
+}
+
+/* he/him — darkest */
+.dtree-node--male       { border-color: rgba(69,35,69,0.7);  border-width: 1.5px; }
+.dtree-node--male:hover { border-color: rgba(69,35,69,0.9); }
+.dark-mode .dtree-node--male       { border-color: rgba(255,215,0,0.65); }
+.dark-mode .dtree-node--male:hover { border-color: rgba(255,215,0,0.85); }
+
+/* ae/aer — medium */
+.dtree-node--ae       { border-color: rgba(69,35,69,0.45); border-width: 1.25px; }
+.dtree-node--ae:hover { border-color: rgba(69,35,69,0.7); }
+.dark-mode .dtree-node--ae       { border-color: rgba(255,215,0,0.42); }
+.dark-mode .dtree-node--ae:hover { border-color: rgba(255,215,0,0.65); }
+
+/* she/her / default — lightest */
+.dtree-node--female { border-color: rgba(69,35,69,0.25); border-width: 1px; }
+.dark-mode .dtree-node--female { border-color: rgba(255,215,0,0.22); }
+
+/* ── Expand button ────────────────────────────────────────────────── */
+.dtree-expand-btn {
+    position: absolute;
+    bottom: -10px; left: 50%;
+    transform: translateX(-50%);
+    background: none; border: none;
+    color: var(--text-secondary);
+    font-size: 0.7em; line-height: 1;
+    cursor: pointer; padding: 2px 4px;
+    transition: color 0.15s ease, transform 0.15s ease;
+    z-index: 3;
+}
+.dtree-expand-btn:hover {
+    color: var(--primary-color);
+    transform: translateX(-50%) scale(1.2);
+}
+.dark-mode .dtree-expand-btn       { color: rgba(195,177,133,0.7); }
+.dark-mode .dtree-expand-btn:hover { color: #FFD700; transform: translateX(-50%) scale(1.2); }
+.dtree-expand-btn--open            { color: var(--primary-color); }
+.dark-mode .dtree-expand-btn--open { color: #FFD700; }
+.dtree-expand-btn:disabled         { opacity: 0.45; cursor: default; }
+
+.dtree-node:has(.dtree-expand-btn) { padding-bottom: 14px; }
+
+@media (max-width: 600px) {
+    .dtree-node { min-width: 95px; padding: 6px 10px 5px; }
+    .dtree-node:has(.dtree-expand-btn) { padding-bottom: 12px; }
+}

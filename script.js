@@ -1780,9 +1780,16 @@ async function displayCharacterDetails(characterId) {
             toggleBtn.addEventListener('click', () => {
                 const open = treeBody.style.display !== 'none';
                 if (open) {
+                    // Collapse AND full reset so next open starts fresh at 2 generations
                     treeBody.style.display = 'none';
                     toggleBtn.setAttribute('aria-expanded', 'false');
                     toggleBtn.classList.remove('ancestor-tree-toggle--open');
+            
+                    // Reset state so expand arrows can't get confused on re-open
+                    treeBuilt    = false;
+                    rootTreeNode = null;
+                    _keyCounter  = 0;
+                    treeRoot.innerHTML = '';
                 } else {
                     treeBody.style.display = '';
                     toggleBtn.setAttribute('aria-expanded', 'true');
@@ -1791,6 +1798,648 @@ async function displayCharacterDetails(characterId) {
                 }
             });
         }
+// ── Descendant Tree panel ────────────────────────────────────────────
+{
+    const _dtAllChildren = Object.values(characterMap).filter(other => {
+        if (other.id === characterId) return false;
+        return new Set(getParentIds(other).filter(p => p && p.trim())).has(characterId);
+    });
+
+    if (_dtAllChildren.length > 0) {
+        const descPanel = document.createElement('div');
+        descPanel.classList.add('descendant-tree-panel');
+        descPanel.innerHTML = `
+            <div class="descendant-tree-header">
+                <span>Descendant Tree</span>
+                <button class="descendant-tree-toggle" aria-expanded="false">&#x25bc;</button>
+            </div>
+            <div class="descendant-tree-body" style="display:none;">
+                <div class="descendant-tree-scroll">
+                    <div class="descendant-tree-root"></div>
+                </div>
+            </div>`;
+        desc.appendChild(descPanel);
+
+        const dToggleBtn = descPanel.querySelector('.descendant-tree-toggle');
+        const dTreeBody  = descPanel.querySelector('.descendant-tree-body');
+        const dTreeRoot  = descPanel.querySelector('.descendant-tree-root');
+
+        // ── helpers ──────────────────────────────────────────────────
+        function dtPronounClass(c) {
+            if (!c || !c.pronouns) return 'dtree-node--female';
+            const p = c.pronouns.toLowerCase();
+            if (p.includes('he/him') || p.startsWith('he')) return 'dtree-node--male';
+            if (p.includes('ae/aer') || p.startsWith('ae'))  return 'dtree-node--ae';
+            return 'dtree-node--female';
+        }
+
+        function dtDateStr(c) {
+            if (!c) return '';
+            const by = c.birthday && c.birthday.year ? parseInt(c.birthday.year) : null;
+            const sd = c.death_date && c.death_date.year && !isSpoilerDeath(c);
+            const dy = sd ? parseInt(c.death_date.year) : null;
+            if (by && dy) return `${by.toLocaleString()}\u2013${dy.toLocaleString()}`;
+            if (by)        return `b.\u00a0${by.toLocaleString()}`;
+            return '';
+        }
+
+        function dtNodeInner(id, c) {
+            const lbl  = c ? escHtml(c.goes_by || c.name) : escHtml(id);
+            const date = dtDateStr(c);
+            return `<button class="atree-name-btn" data-char-id="${escHtml(id)}">${lbl}</button>`
+                 + (date ? `<span class="atree-dates">${date}</span>` : '');
+        }
+
+        const dtByBirth = (a, b) => {
+            const ba = a.char.birthday||{}, bb = b.char.birthday||{};
+            const ya = parseInt(ba.year)||0,  yb = parseInt(bb.year)||0;
+            if (ya !== yb) return ya - yb;
+            const ta = parseInt(ba.tritquarter)||0, tb = parseInt(bb.tritquarter)||0;
+            if (ta !== tb) return ta - tb;
+            return (parseInt(ba.day)||0) - (parseInt(bb.day)||0);
+        };
+
+        function dtGroups(parentId) {
+            const map = new Map();
+            Object.values(characterMap).forEach(o => {
+                if (o.id === parentId) return;
+                // Use getParentIds (revealed only) — if parentId is unrevealed on this
+                // child's record, that child must not appear in parentId's descendant tree.
+                const revealedParents = new Set(getParentIds(o).filter(p => p && p.trim()));
+                if (!revealedParents.has(parentId)) return;
+                // Co-parents are also revealed-only: don't show a co-parent whose
+                // identity is flagged as a spoiler on this child's record.
+                const cops = [...revealedParents].filter(p => p !== parentId).sort();
+                const key  = cops.join('|') || '__none__';
+                if (!map.has(key)) map.set(key, { cops, children: [] });
+                map.get(key).children.push({ charId: o.id, char: o });
+            });
+            const gs = [...map.values()];
+            gs.forEach(g => g.children.sort(dtByBirth));
+            gs.sort((a, b) => {
+                // Groups with no co-parent sort last (after all named co-parent groups)
+                const aNoP = a.cops.length === 0;
+                const bNoP = b.cops.length === 0;
+                if (aNoP !== bNoP) return aNoP ? 1 : -1;
+                const na = a.cops.map(p => (characterMap[p]||{}).goes_by||(characterMap[p]||{}).name||p).join(',');
+                const nb = b.cops.map(p => (characterMap[p]||{}).goes_by||(characterMap[p]||{}).name||p).join(',');
+                return na.localeCompare(nb);
+            });
+            return gs;
+        }
+
+        function dtHasKids(id) {
+            // Only count children where this character's parenthood is revealed
+            return Object.values(characterMap).some(o => {
+                if (o.id === id) return false;
+                return new Set(getParentIds(o).filter(p => p && p.trim())).has(id);
+            });
+        }
+
+        // ── HTML rendering ────────────────────────────────────────────
+        //
+        // DOM structure (one group per co-parent pairing):
+        //
+        // TOP-LEVEL group (.dtree-group--root):
+        //   .dtree-coupling-row
+        //     .dtree-node.dtree-node--subject   ← the page subject
+        //     .dtree-node ...                   ← co-parent(s)
+        //   .dtree-children-row
+        //     .dtree-child-wrap
+        //       .dtree-node                     ← child card (has expand btn)
+        //       .dtree-subtree                  ← present when expanded
+        //         .dtree-sub-group              ← one per co-parent pairing of THIS child
+        //           .dtree-sub-coupling         ← child card COPY (anchor) + co-parent(s)
+        //             .dtree-node.dtree-node--subject  ← repeated child card (context only)
+        //             .dtree-node ...                  ← child's co-parent(s)
+        //           .dtree-children-row
+        //             .dtree-child-wrap ...
+        //
+        // KEY INSIGHT: inside .dtree-subtree, we DO render a subject card — but
+        // it is styled as a muted "context" card (.dtree-node--context), not
+        // identical to the child card above. The child card above is the real one;
+        // the context card is just the left side of the coupling row so co-parents
+        // appear BESIDE it, not below it.
+        //
+        // Wait — that brings back duplication visually.
+        //
+        // CORRECT APPROACH: The .dtree-subtree is made flex-direction:row when
+        // there are co-parents. The child card sits on the left; the subtree with
+        // all the children hangs below both. We achieve this by restructuring:
+        //
+        // .dtree-child-wrap
+        //   .dtree-child-and-cops        ← flex-row: child card + co-parent card(s)
+        //     .dtree-node                ← the child card (expand btn here)
+        //     .dtree-cop-stack           ← vertical stack of co-parent cards (one per group)
+        //       .dtree-node ...          ← co-parent for group 1
+        //       .dtree-node ...          ← co-parent for group 2 (if multiple groups)
+        //   .dtree-subtree               ← all children-rows, below the coupling row
+        //     .dtree-sub-group
+        //       .dtree-children-row
+        //         .dtree-child-wrap ...
+        //
+        // SVG per sub-group reaches UP to:
+        //   - the child card (.dtree-child-and-cops > .dtree-node) as subject anchor
+        //   - the corresponding co-parent card in .dtree-cop-stack as co-parent
+        // This way both are in the same .dtree-child-wrap and getBoundingClientRect works.
+
+        function dtChildCard(charId, char, groups, expandedSet, copKey) {
+            // groups = all co-parent groups for this child
+            // copKey = the co-parent group key from the PARENT's perspective (for root-level SVG tagging)
+            const cls     = dtPronounClass(char);
+            const hasKids = dtHasKids(charId);
+            const isOpen  = expandedSet.has(charId);
+            const btn = hasKids
+                ? `<button class="dtree-expand-btn${isOpen ? ' dtree-expand-btn--open' : ''}"
+                           data-dtree-expand-id="${escHtml(charId)}"
+                           title="${isOpen ? 'Collapse' : 'Expand'} descendants">
+                           ${isOpen ? '\u25b2' : '\u25bc'}</button>`
+                : '';
+
+            // Co-parent cards — one per unique co-parent, tagged with their group key
+            let copStackHtml = '';
+            let subtreeHtml  = '';
+            if (isOpen && groups.length > 0) {
+                const seenSubCops = new Set();
+                copStackHtml = groups.flatMap(({ cops }) => {
+                    const gKey = cops.slice().sort().join('|') || '__none__';
+                    return cops.filter(pid => {
+                        if (seenSubCops.has(pid)) return false;
+                        seenSubCops.add(pid); return true;
+                    }).map(pid => {
+                        const cp = characterMap[pid] || null;
+                        return `<div class="dtree-node ${dtPronounClass(cp)}"
+                                     data-char-id="${escHtml(pid)}"
+                                     data-cop-key="${escHtml(gKey)}">${dtNodeInner(pid, cp)}</div>`;
+                    });
+                }).join('');
+
+                // All grandchildren merged into one row, tagged with cop-key
+                const allGrandchildren = groups.flatMap(({ cops, children }) => {
+                    const gKey = cops.slice().sort().join('|') || '__none__';
+                    return children.map(ch => ({ ...ch, gKey }));
+                });
+                allGrandchildren.sort(dtByBirth);
+                const grandKidCards = allGrandchildren.map(({ charId: cid, char: cc, gKey }) =>
+                    dtChildCard(cid, cc, dtGroups(cid), expandedSet, gKey)
+                ).join('');
+
+                subtreeHtml = `<div class="dtree-sub-group" data-sub-group-parent="${escHtml(charId)}">
+                    <div class="dtree-children-row">${grandKidCards}</div>
+                </div>`;
+            }
+
+            const hasCops = isOpen && groups.some(g => g.cops.length > 0);
+
+            return `<div class="dtree-child-wrap" data-child-id="${escHtml(charId)}"${copKey ? ` data-cop-key="${escHtml(copKey)}"` : ''}>
+                <div class="dtree-child-and-cops${hasCops ? ' dtree-child-and-cops--has-cops' : ''}">
+                    <div class="dtree-node ${cls}" data-dtree-child-id="${escHtml(charId)}">
+                        ${btn}${dtNodeInner(charId, char)}
+                    </div>
+                    ${copStackHtml ? `<div class="dtree-cop-stack">${copStackHtml}</div>` : ''}
+                </div>
+                ${subtreeHtml ? `<div class="dtree-subtree" data-subtree-for="${escHtml(charId)}">${subtreeHtml}</div>` : ''}
+            </div>`;
+        }
+
+        // Full top-level render
+        function dtRender(expandedSet) {
+            const groups = dtGroups(characterId);
+            if (!groups.length) { dTreeRoot.innerHTML = ''; return; }
+
+            // One coupling row: subject + all unique co-parents (tagged with data-cop-key).
+            // One children row: all children merged & sorted by birth, each tagged with
+            // data-cop-key so the SVG layer can draw per-group connectors correctly:
+            //   - children WITH a co-parent: connector from sides of subject <-> co-parent,
+            //     then down to their child bar
+            //   - children with NO co-parent: connector from bottom of subject down to
+            //     their own child bar (drawn separately, same row)
+            const subjectCard = `<div class="dtree-node dtree-node--subject"
+                                      data-dtree-subject="${escHtml(characterId)}">
+                ${dtNodeInner(characterId, data)}
+            </div>`;
+
+            // Co-parent cards — tagged with the co-parent group key
+            const seenCops = new Set();
+            const allCopCards = groups.flatMap(({ cops }) => {
+                const gKey = cops.slice().sort().join('|') || '__none__';
+                return cops.filter(pid => {
+                    if (seenCops.has(pid)) return false;
+                    seenCops.add(pid); return true;
+                }).map(pid => {
+                    const c = characterMap[pid] || null;
+                    return `<div class="dtree-node ${dtPronounClass(c)}"
+                                 data-char-id="${escHtml(pid)}"
+                                 data-cop-key="${escHtml(gKey)}">${dtNodeInner(pid, c)}</div>`;
+                });
+            }).join('');
+
+            // All children merged and sorted by birth, each tagged with their group key
+            const allChildren = groups.flatMap(({ cops, children }) => {
+                const gKey = cops.slice().sort().join('|') || '__none__';
+                return children.map(ch => ({ ...ch, gKey }));
+            });
+            allChildren.sort(dtByBirth);
+
+            const kidCards = allChildren.map(({ charId, char, gKey }) =>
+                dtChildCard(charId, char, dtGroups(charId), expandedSet, gKey)
+            ).join('');
+
+            const html = `<div class="dtree-group dtree-group--root">
+                <div class="dtree-coupling-row">${subjectCard}${allCopCards}</div>
+                <div class="dtree-children-row">${kidCards}</div>
+            </div>`;
+
+            dTreeRoot.innerHTML = html;
+            dtWireButtons();
+            requestAnimationFrame(() => requestAnimationFrame(dtRedrawAll));
+        }
+
+        // ── SVG connectors ────────────────────────────────────────────
+        //
+        // ROOT GROUP (.dtree-group--root):
+        //   Reads .dtree-coupling-row for subject + co-parents.
+        //   Reads .dtree-children-row > .dtree-child-wrap > .dtree-child-and-cops > .dtree-node
+        //   for child anchor positions.
+        //
+        // SUB GROUP (.dtree-sub-group):
+        //   Subject anchor = closest .dtree-child-wrap > .dtree-child-and-cops > .dtree-node
+        //   Co-parent = .dtree-cop-stack > .dtree-node[data-cop-group="N"] where N = group index
+        //   Children = .dtree-children-row > .dtree-child-wrap > .dtree-child-and-cops > .dtree-node
+
+        function dtMakeSVG(container, width, height) {
+            container.querySelectorAll(':scope > .dtree-svg-overlay').forEach(s => s.remove());
+            container.style.position = 'relative';
+            const isDark = document.body.classList.contains('dark-mode');
+            const stroke = isDark ? 'rgba(255,215,0,0.4)' : 'rgba(69,35,69,0.4)';
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.classList.add('dtree-svg-overlay');
+            svg.setAttribute('width', width); svg.setAttribute('height', height);
+            svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            svg.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:1;overflow:visible;';
+            container.insertBefore(svg, container.firstChild);
+            return { svg, stroke };
+        }
+
+        function dtLines(svg, stroke, gr, nodes, childNodes) {
+            // nodes[0] = anchor/subject, nodes[1..] = co-parents
+            if (!nodes.length || !childNodes.length) return;
+
+            function rcx(el)  { const r = el.getBoundingClientRect(); return r.left + r.width/2  - gr.left; }
+            function rtop(el) { return el.getBoundingClientRect().top    - gr.top; }
+            function rbot(el) { return el.getBoundingClientRect().bottom - gr.top; }
+
+            function line(x1,y1,x2,y2) {
+                const l = document.createElementNS('http://www.w3.org/2000/svg','line');
+                l.setAttribute('x1',x1); l.setAttribute('y1',y1);
+                l.setAttribute('x2',x2); l.setAttribute('y2',y2);
+                l.setAttribute('stroke', stroke);
+                l.setAttribute('stroke-width','1.5');
+                l.setAttribute('stroke-linecap','round');
+                svg.appendChild(l);
+            }
+
+            const anchorCx   = rcx(nodes[0]);
+            const anchorBot  = rbot(nodes[0]);
+            const minKidTop  = Math.min(...childNodes.map(n => rtop(n)));
+            const cops       = nodes.slice(1);
+
+            if (cops.length > 0) {
+                const allNodes = nodes;
+                const allCxs   = allNodes.map(n => rcx(n));
+                const allBots  = allNodes.map(n => rbot(n));
+                const maxBot   = Math.max(...allBots);
+                const couplingY = maxBot + (minKidTop - maxBot) * 0.4;
+
+                allNodes.forEach((n, i) => {
+                    if (allBots[i] < couplingY) line(allCxs[i], allBots[i], allCxs[i], couplingY);
+                });
+                line(Math.min(...allCxs), couplingY, Math.max(...allCxs), couplingY);
+
+                const childBarY = couplingY + (minKidTop - couplingY) * 0.5;
+                line(anchorCx, couplingY, anchorCx, childBarY);
+
+                const kidCxs  = childNodes.map(n => rcx(n));
+                const barMinX = Math.min(anchorCx, ...kidCxs);
+                const barMaxX = Math.max(anchorCx, ...kidCxs);
+                if (barMinX < barMaxX) line(barMinX, childBarY, barMaxX, childBarY);
+                childNodes.forEach(n => line(rcx(n), childBarY, rcx(n), rtop(n)));
+            } else {
+                const childBarY = anchorBot + (minKidTop - anchorBot) * 0.5;
+                line(anchorCx, anchorBot, anchorCx, childBarY);
+                const kidCxs  = childNodes.map(n => rcx(n));
+                const barMinX = Math.min(anchorCx, ...kidCxs);
+                const barMaxX = Math.max(anchorCx, ...kidCxs);
+                if (barMinX < barMaxX) line(barMinX, childBarY, barMaxX, childBarY);
+                childNodes.forEach(n => line(rcx(n), childBarY, rcx(n), rtop(n)));
+            }
+        }
+
+        function dtDrawRootGroup(group) {
+            const couplingRow = group.querySelector(':scope > .dtree-coupling-row');
+            const childrenRow = group.querySelector(':scope > .dtree-children-row');
+            if (!couplingRow || !childrenRow) return;
+
+            const subject = couplingRow.querySelector(':scope > .dtree-node--subject');
+            if (!subject) return;
+
+            const allChildWraps = [...childrenRow.querySelectorAll(':scope > .dtree-child-wrap')];
+            if (!allChildWraps.length) return;
+
+            const gr = group.getBoundingClientRect();
+            if (!gr.width || !gr.height) return;
+            const { svg, stroke } = dtMakeSVG(group, gr.width, gr.height);
+
+            function rcx(el)   { const r = el.getBoundingClientRect(); return r.left + r.width / 2 - gr.left; }
+            function rcy(el)   { const r = el.getBoundingClientRect(); return r.top  + r.height / 2 - gr.top; }
+            function rtop(el)  { return el.getBoundingClientRect().top    - gr.top; }
+            function rbot(el)  { return el.getBoundingClientRect().bottom - gr.top; }
+            function rleft(el) { return el.getBoundingClientRect().left   - gr.left; }
+            function rright(el){ return el.getBoundingClientRect().right  - gr.left; }
+
+            function line(x1, y1, x2, y2) {
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+                l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+                l.setAttribute('stroke', stroke);
+                l.setAttribute('stroke-width', '1.5');
+                l.setAttribute('stroke-linecap', 'round');
+                svg.appendChild(l);
+            }
+
+            function arrowHead(x, y, pointingUp) {
+                const size = 5;
+                const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const pts = pointingUp
+                    ? `${x},${y} ${x - size},${y + size * 1.6} ${x + size},${y + size * 1.6}`
+                    : `${x},${y} ${x - size},${y - size * 1.6} ${x + size},${y - size * 1.6}`;
+                poly.setAttribute('points', pts);
+                poly.setAttribute('fill', stroke);
+                svg.appendChild(poly);
+            }
+
+            // Collect cop cards from the coupling row, keyed by data-cop-key
+            const copCardsByKey = {};
+            couplingRow.querySelectorAll(':scope > .dtree-node[data-cop-key]').forEach(el => {
+                copCardsByKey[el.dataset.copKey] = el;
+            });
+
+            // Group child wraps by their cop-key
+            const wrapsByKey = {};
+            allChildWraps.forEach(w => {
+                const k = w.dataset.copKey || '__none__';
+                if (!wrapsByKey[k]) wrapsByKey[k] = [];
+                wrapsByKey[k].push(w);
+            });
+
+            const subCx  = rcx(subject);
+            const subBot = rbot(subject);
+            const subCy  = rcy(subject);
+
+            Object.entries(wrapsByKey).forEach(([key, wraps]) => {
+                const childNodes = wraps
+                    .map(w => w.querySelector(':scope > .dtree-child-and-cops > .dtree-node'))
+                    .filter(Boolean);
+                if (!childNodes.length) return;
+
+                const minKidTop = Math.min(...childNodes.map(n => rtop(n)));
+                const kidCxs    = childNodes.map(n => rcx(n));
+
+                const copCard = copCardsByKey[key];
+
+                if (copCard) {
+                    // ── Co-parented children ──────────────────────────────────────
+                    // Horizontal line from right-mid of subject to left-mid of co-parent
+                    const subRight  = rright(subject);
+                    const copLeft   = rleft(copCard);
+                    const copCy     = rcy(copCard);
+                    const lineY     = (subCy + copCy) / 2;  // midpoint vertically
+                    const midX      = (subRight + copLeft) / 2; // midpoint horizontally
+
+                    // Vertical stub down from subject right-mid to lineY
+                    if (subCy !== lineY) line(subRight, subCy, subRight, lineY);
+                    // Vertical stub down from cop left-mid to lineY
+                    if (copCy !== lineY) line(copLeft, copCy, copLeft, lineY);
+                    // Horizontal coupling line
+                    line(subRight, lineY, copLeft, lineY);
+
+                    // Vertical drop from midpoint of coupling line down to child bar
+                    const childBarY = lineY + (minKidTop - lineY) * 0.55;
+                    line(midX, lineY, midX, childBarY);
+
+                    // Horizontal child bar spanning all children (and midX)
+                    const barMinX = Math.min(midX, ...kidCxs);
+                    const barMaxX = Math.max(midX, ...kidCxs);
+                    if (barMinX < barMaxX) line(barMinX, childBarY, barMaxX, childBarY);
+
+                    // Vertical drops to each child
+                    childNodes.forEach(n => {
+                        const cx = rcx(n);
+                        const top = rtop(n);
+                        line(cx, childBarY, cx, top);
+                        arrowHead(cx, top, true);
+                    });
+                } else {
+                    // ── Solo-parent children (no co-parent) ──────────────────────
+                    // Vertical line straight down from bottom of subject
+                    const childBarY = subBot + (minKidTop - subBot) * 0.5;
+                    line(subCx, subBot, subCx, childBarY);
+
+                    const barMinX = Math.min(subCx, ...kidCxs);
+                    const barMaxX = Math.max(subCx, ...kidCxs);
+                    if (barMinX < barMaxX) line(barMinX, childBarY, barMaxX, childBarY);
+
+                    childNodes.forEach(n => {
+                        const cx = rcx(n);
+                        const top = rtop(n);
+                        line(cx, childBarY, cx, top);
+                        arrowHead(cx, top, true);
+                    });
+                }
+            });
+        }
+
+        function dtDrawSubGroup(subGroup) {
+            // Find the expanded child card (anchor) and its co-parent stack
+            const childWrap    = subGroup.closest('.dtree-subtree')?.parentElement;
+            const childAndCops = childWrap?.querySelector(':scope > .dtree-child-and-cops');
+            const anchorNode   = childAndCops?.querySelector(':scope > .dtree-node');
+            if (!anchorNode) return;
+
+            const copStack = childAndCops.querySelector(':scope > .dtree-cop-stack');
+
+            const childrenRow = subGroup.querySelector(':scope > .dtree-children-row');
+            if (!childrenRow) return;
+            const allChildWraps = [...childrenRow.querySelectorAll(':scope > .dtree-child-wrap')];
+            if (!allChildWraps.length) return;
+
+            // Place SVG on the childWrap so it covers both anchor and subtree
+            const refGr = childWrap.getBoundingClientRect();
+            if (!refGr.width || !refGr.height) return;
+            const { svg, stroke } = dtMakeSVG(childWrap, refGr.width, refGr.height);
+
+            function rcx(el)   { const r = el.getBoundingClientRect(); return r.left + r.width / 2 - refGr.left; }
+            function rcy(el)   { const r = el.getBoundingClientRect(); return r.top  + r.height / 2 - refGr.top; }
+            function rtop(el)  { return el.getBoundingClientRect().top    - refGr.top; }
+            function rbot(el)  { return el.getBoundingClientRect().bottom - refGr.top; }
+            function rleft(el) { return el.getBoundingClientRect().left   - refGr.left; }
+            function rright(el){ return el.getBoundingClientRect().right  - refGr.left; }
+
+            function line(x1, y1, x2, y2) {
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+                l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+                l.setAttribute('stroke', stroke);
+                l.setAttribute('stroke-width', '1.5');
+                l.setAttribute('stroke-linecap', 'round');
+                svg.appendChild(l);
+            }
+
+            function arrowHead(x, y) {
+                const size = 5;
+                const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                poly.setAttribute('points', `${x},${y} ${x - size},${y + size * 1.6} ${x + size},${y + size * 1.6}`);
+                poly.setAttribute('fill', stroke);
+                svg.appendChild(poly);
+            }
+
+            // Collect cop cards keyed by data-cop-key
+            const copCardsByKey = {};
+            if (copStack) {
+                copStack.querySelectorAll(':scope > .dtree-node[data-cop-key]').forEach(el => {
+                    copCardsByKey[el.dataset.copKey] = el;
+                });
+            }
+
+            // Group child wraps by cop-key
+            const wrapsByKey = {};
+            allChildWraps.forEach(w => {
+                const k = w.dataset.copKey || '__none__';
+                if (!wrapsByKey[k]) wrapsByKey[k] = [];
+                wrapsByKey[k].push(w);
+            });
+
+            const subCx  = rcx(anchorNode);
+            const subBot = rbot(anchorNode);
+            const subCy  = rcy(anchorNode);
+
+            Object.entries(wrapsByKey).forEach(([key, wraps]) => {
+                const childNodes = wraps
+                    .map(w => w.querySelector(':scope > .dtree-child-and-cops > .dtree-node'))
+                    .filter(Boolean);
+                if (!childNodes.length) return;
+
+                const minKidTop = Math.min(...childNodes.map(n => rtop(n)));
+                const kidCxs    = childNodes.map(n => rcx(n));
+                const copCard   = copCardsByKey[key];
+
+                if (copCard) {
+                    // Side connector: right of anchor -> left of co-parent, drop from midpoint
+                    const subRight = rright(anchorNode);
+                    const copLeft  = rleft(copCard);
+                    const copCy    = rcy(copCard);
+                    const lineY    = (subCy + copCy) / 2;
+                    const midX     = (subRight + copLeft) / 2;
+
+                    if (subCy !== lineY) line(subRight, subCy, subRight, lineY);
+                    if (copCy !== lineY) line(copLeft,  copCy, copLeft,  lineY);
+                    line(subRight, lineY, copLeft, lineY);
+
+                    const childBarY = lineY + (minKidTop - lineY) * 0.55;
+                    line(midX, lineY, midX, childBarY);
+
+                    const barMinX = Math.min(midX, ...kidCxs);
+                    const barMaxX = Math.max(midX, ...kidCxs);
+                    if (barMinX < barMaxX) line(barMinX, childBarY, barMaxX, childBarY);
+                    childNodes.forEach(n => {
+                        const cx = rcx(n); const top = rtop(n);
+                        line(cx, childBarY, cx, top);
+                        arrowHead(cx, top);
+                    });
+                } else {
+                    // Solo connector: straight down from bottom of anchor
+                    const childBarY = subBot + (minKidTop - subBot) * 0.5;
+                    line(subCx, subBot, subCx, childBarY);
+
+                    const barMinX = Math.min(subCx, ...kidCxs);
+                    const barMaxX = Math.max(subCx, ...kidCxs);
+                    if (barMinX < barMaxX) line(barMinX, childBarY, barMaxX, childBarY);
+                    childNodes.forEach(n => {
+                        const cx = rcx(n); const top = rtop(n);
+                        line(cx, childBarY, cx, top);
+                        arrowHead(cx, top);
+                    });
+                }
+            });
+        }
+
+        function dtRedrawAll() {
+            dTreeRoot.querySelectorAll('.dtree-group--root').forEach(dtDrawRootGroup);
+            dTreeRoot.querySelectorAll('.dtree-sub-group').forEach(dtDrawSubGroup);
+        }
+
+        // ── Fetch descendants ─────────────────────────────────────────
+        async function dtFetch(charId, depth) {
+            const kids = Object.values(characterMap).filter(o => {
+                if (o.id === charId) return false;
+                return new Set(getAllParentIds(o).filter(p => p && p.trim())).has(charId);
+            });
+            const needed = new Set();
+            kids.forEach(c => {
+                if (!characterMap[c.id]) needed.add(c.id);
+                getAllParentIds(c).forEach(pid => { if (pid && !characterMap[pid]) needed.add(pid); });
+            });
+            await Promise.all([...needed].map(async id => {
+                try {
+                    const s = await db.collection('characters').doc(id).get();
+                    if (s.exists) characterMap[id] = { id, ...s.data() };
+                } catch(e) {}
+            }));
+            if (depth > 1) await Promise.all(kids.map(c => dtFetch(c.id, depth - 1)));
+        }
+
+        // ── Wire buttons ──────────────────────────────────────────────
+        function dtWireButtons() {
+            dTreeRoot.querySelectorAll('.atree-name-btn').forEach(btn => {
+                btn.addEventListener('click', () => displayCharacterDetails(btn.dataset.charId));
+            });
+            dTreeRoot.querySelectorAll('.dtree-expand-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.dataset.dtreeExpandId;
+                    if (!id) return;
+                    if (dExpandedSet.has(id)) {
+                        dExpandedSet.delete(id);
+                    } else {
+                        btn.disabled = true; btn.textContent = '…';
+                        await dtFetch(id, 2);
+                        dExpandedSet.add(id);
+                    }
+                    dtRender(dExpandedSet);
+                });
+            });
+        }
+
+        let dExpandedSet = new Set();
+
+        // ── Toggle ────────────────────────────────────────────────────
+        dToggleBtn.addEventListener('click', () => {
+            const open = dTreeBody.style.display !== 'none';
+            if (open) {
+                dTreeBody.style.display = 'none';
+                dToggleBtn.setAttribute('aria-expanded', 'false');
+                dToggleBtn.classList.remove('descendant-tree-toggle--open');
+                dExpandedSet = new Set();
+                dTreeRoot.innerHTML = '';
+            } else {
+                dTreeBody.style.display = '';
+                dToggleBtn.setAttribute('aria-expanded', 'true');
+                dToggleBtn.classList.add('descendant-tree-toggle--open');
+                dtRender(dExpandedSet);
+            }
+        });
+    }
+}
+// END Descendant Tree panel
         desc.insertAdjacentHTML('afterbegin', data.description || 'No description available.');
 
         // ── Wire up all char-name-link buttons (parents, relationships, etc.) 
