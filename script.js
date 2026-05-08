@@ -111,6 +111,53 @@ function addAppTracking(url, campaign = 'general') {
     return `${url}${separator}utm_source=airdaeium_app&utm_medium=app&utm_campaign=${campaign}`;
 }
 
+// =================================================================================
+// In-App Description Link Parser
+// =================================================================================
+// Converts [[type:id|Label]] shorthand in Firestore description fields into
+// clickable in-app navigation anchors.
+//
+// Supported types:
+//   [[character:c_starshine|Starshine]]   → navigates to character detail
+//   [[city:city_stragos|Stragos]]         → navigates to city detail
+//   [[country:ctry_merkama|the Merkama]]  → navigates to country detail
+//   [[species:s_elf|Elf]]                 → navigates to species detail
+//
+// Usage:
+//   1. Call parseDescriptionLinks(rawHtml) to convert shorthand → anchor tags
+//   2. Insert the result via innerHTML / insertAdjacentHTML as normal
+//   3. Call wireDescriptionLinks(containerEl, contextPage, contextId) to attach
+//      click handlers. contextPage / contextId are passed to detail functions
+//      as the "fromPage" / "fromId" back-navigation args.
+
+function parseDescriptionLinks(html) {
+    if (!html) return html;
+    return html.replace(
+        /\[\[(character|city|country|species):([^\]|]+)\|([^\]]+)\]\]/g,
+        (match, type, id, label) => {
+            const safeId    = id.trim();
+            const safeLabel = label.trim();
+            return `<a href="#" class="desc-nav-link info-${type}-link" data-nav-type="${type}" data-nav-id="${safeId}">${safeLabel}</a>`;
+        }
+    );
+}
+
+// Wires click handlers onto desc-nav-link anchors inside containerEl.
+// contextPage / contextId tell the destination page where to "back" to.
+function wireDescriptionLinks(containerEl, contextPage, contextId) {
+    containerEl.querySelectorAll('.desc-nav-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const type = link.dataset.navType;
+            const id   = link.dataset.navId;
+            if (type === 'character') displayCharacterDetails(id);
+            else if (type === 'city')    displayCityDetails(id, contextPage, contextId);
+            else if (type === 'country') displayCountryDetails(id);
+            else if (type === 'species') displaySpeciesDetails(id, contextPage, contextId);
+        });
+    });
+}
+
 // FIX: Placeholder data URI — avoids the via.placeholder.com external request error
 const PLACEHOLDER_IMG = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22100%22 height%3D%22100%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
 const PLACEHOLDER_IMG_LARGE = 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 width%3D%22200%22 height%3D%22200%22%3E%3Crect width%3D%22100%25%22 height%3D%22100%25%22 fill%3D%22%23452345%22/%3E%3C/svg%3E';
@@ -677,7 +724,9 @@ function appendCharacterCard(container, charData, released = true) {
 
     const descEl = document.createElement('p');
     const rawDesc = charData.description || 'No description available.';
-    const plainDesc = rawDesc.replace(/<[^>]*>/g, '');
+    const plainDesc = rawDesc
+        .replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1') // strip [[type:id|Label]] → Label
+        .replace(/<[^>]*>/g, '');                    // strip HTML tags
     descEl.textContent = plainDesc.length > 150 ? plainDesc.substring(0, 150) + '...' : plainDesc;
 
     text.appendChild(nameEl);
@@ -923,8 +972,8 @@ async function displayCharacterDetails(characterId) {
 
         // ── Helper: get revealed parent IDs from new mother_id/father_id fields ──────
         // Falls back to legacy parent_ids for any docs not yet migrated.
-        // mother_reveal / father_reveal = false means that parent's identity is a spoiler
-        // and should be omitted from the family box and ancestor tree.
+        // mother_reveal / father_reveal = false means that parent's identity is a spoiler.
+        // If a corresponding *_book_id field is set, we show a spoiler pill instead of hiding entirely.
         function getParentIds(charData) {
             if (!charData) return [];
             // New schema: mother_id / father_id with optional reveal flags
@@ -948,12 +997,55 @@ async function displayCharacterDetails(characterId) {
             return (charData.parent_ids || []).filter(Boolean);
         }
 
+        // Returns an array of spoiler-parent entries for the family box.
+        // Each entry: { role: 'father'|'mother', charId, bookId } — only included
+        // when *_reveal === false AND *_book_id is set (otherwise they stay fully hidden).
+        function getSpoilerParentEntries(charData) {
+            if (!charData) return [];
+            const entries = [];
+            if (charData.father_id && charData.father_reveal === false && charData.father_book_id) {
+                entries.push({ role: 'father', charId: charData.father_id, bookId: charData.father_book_id });
+            }
+            if (charData.mother_id && charData.mother_reveal === false && charData.mother_book_id) {
+                entries.push({ role: 'mother', charId: charData.mother_id, bookId: charData.mother_book_id });
+            }
+            return entries;
+        }
+
+        // Returns true if the given parentId is unrevealed on charData
+        // (used to filter sibling/child groups to avoid leaking spoiler co-parents)
+        function isParentUnrevealed(charData, parentId) {
+            if (!charData || !parentId) return false;
+            if (charData.father_id === parentId && charData.father_reveal === false) return true;
+            if (charData.mother_id === parentId && charData.mother_reveal === false) return true;
+            return false;
+        }
+
+        // Renders a spoiler pill for an unrevealed parent.
+        // bookMap: Map of bookId → book data (for title lookup).
+        // charId / charData: the actual parent (used when revealed via click).
+        function spoilerParentPill(role, charId, bookId, bookData, charData) {
+            const bookTitle = bookData ? bookData.book_title : null;
+            const label = bookTitle
+                ? `Spoiler: revealed in ${escHtml(bookTitle)}`
+                : `Spoiler`;
+            const revealedName = charData
+                ? escHtml(charData.goes_by || charData.name)
+                : escHtml(charId);
+            // The pill is a button; clicking it swaps itself for the real name link
+            return `<button class="spoiler-parent-pill" data-char-id="${escHtml(charId)}" data-reveal-label="${revealedName}" aria-label="Reveal spoiler parent">🔒 ${label}</button>`;
+        }
+
         // ── Resolve parent names from parent_ids ────────────────────────────
         const parentEntries = [];
         const revealedParentIds = getParentIds(data);
         revealedParentIds.forEach(pid => {
             const parent = characterMap[pid];
-            parentEntries.push({ charId: pid, char: parent || null });
+            parentEntries.push({ charId: pid, char: parent || null, spoiler: false });
+        });
+        // Add spoiler pills for unrevealed parents that have a book_id set
+        getSpoilerParentEntries(data).forEach(({ role, charId, bookId }) => {
+            parentEntries.push({ charId, char: characterMap[charId] || null, spoiler: true, bookId });
         });
 
         // ── Derive family: children and siblings grouped by shared parent(s) ────────
@@ -1005,10 +1097,26 @@ async function displayCharacterDetails(characterId) {
             if (other.id === characterId) return;
             const theirParents = new Set(getAllParentIds(other).filter(pid => pid && pid.trim()));
             if (!theirParents.has(characterId)) return;
-            const otherParentIds = [...theirParents].filter(pid => pid !== characterId).sort();
-            const key = otherParentIds.join('|') || '__none__';
-            if (!childGroupMap.has(key)) childGroupMap.set(key, { otherParentIds, children: [] });
-            childGroupMap.get(key).children.push({ charId: other.id, char: other });
+            // Split co-parents into revealed and spoiler sets
+            const otherParentIds = [...theirParents].filter(pid => pid !== characterId && !isParentUnrevealed(other, pid)).sort();
+            const spoilerCoParentIds = [...theirParents].filter(pid => pid !== characterId && isParentUnrevealed(other, pid)).sort();
+            // Flag the child as a spoiler if the current character is an unrevealed parent on the child's record
+            const isSpoilerChild = isParentUnrevealed(other, characterId);
+            const childBookId = isSpoilerChild
+                ? (other.father_id === characterId ? other.father_book_id : other.mother_book_id) || null
+                : null;
+            // Group key uses ALL co-parent ids so groups stay stable regardless of reveal state
+            const allCoParentIds = [...otherParentIds, ...spoilerCoParentIds].sort();
+            const key = allCoParentIds.join('|') || '__none__';
+            if (!childGroupMap.has(key)) {
+                // Compute bookId for each spoiler co-parent from the child's record
+                const spoilerCoParents = spoilerCoParentIds.map(pid => ({
+                    charId: pid,
+                    bookId: (other.father_id === pid ? other.father_book_id : other.mother_book_id) || null,
+                }));
+                childGroupMap.set(key, { otherParentIds, spoilerCoParents, children: [] });
+            }
+            childGroupMap.get(key).children.push({ charId: other.id, char: other, spoiler: isSpoilerChild, bookId: childBookId });
         });
         const childGroups = [...childGroupMap.values()];
         childGroups.forEach(g => g.children.sort(byBirthDate));
@@ -1026,9 +1134,14 @@ async function displayCharacterDetails(characterId) {
             if (myParentIds.size === 0 || theirParents.size === 0) return;
             const shared = [...myParentIds].filter(pid => theirParents.has(pid)).sort();
             if (shared.length === 0) return;
+            // Only display via parents that are revealed on BOTH characters' records
+            const revealedShared = shared.filter(pid =>
+                !isParentUnrevealed(data, pid) && !isParentUnrevealed(other, pid)
+            );
+            if (revealedShared.length === 0) return; // all shared parents are spoilers — skip this sibling group
             const isFull = shared.length === myParentIds.size && shared.length === theirParents.size;
-            const key = shared.join('|');
-            if (!sibGroupMap.has(key)) sibGroupMap.set(key, { sharedParentIds: shared, full: isFull, members: [] });
+            const key = revealedShared.join('|');
+            if (!sibGroupMap.has(key)) sibGroupMap.set(key, { sharedParentIds: revealedShared, full: isFull, members: [] });
             sibGroupMap.get(key).members.push({ charId: other.id, char: other });
         });
         const siblingGroups = [...sibGroupMap.values()];
@@ -1217,29 +1330,49 @@ async function displayCharacterDetails(characterId) {
 
             // ── Parents (first row) ──────────────────────────────────────────────────
             if (parentEntries.length) {
-                const html = parentEntries
-                    .map(({ charId, char }) => familyLifeLink(charId, char))
-                    .join(', ');
+                const html = parentEntries.map(({ charId, char, spoiler, bookId }) => {
+                    if (spoiler) {
+                        const bookData = bookId ? bookMap[bookId] : null;
+                        return spoilerParentPill('parent', charId, bookId, bookData, char);
+                    }
+                    return familyLifeLink(charId, char);
+                }).join(', ');
                 familyRows.push({ label: parentEntries.length === 1 ? 'Parent' : 'Parents', html });
             }
 
             // ── Children: one row per co-parent group ────────────────────────────────
-            childGroups.forEach(({ otherParentIds, children }) => {
-                const childLinks = children
-                    .map(({ charId, char }) => familyLifeLink(charId, char))
-                    .join(', ');
+            childGroups.forEach(({ otherParentIds, spoilerCoParents, children }) => {
+                const childLinks = children.map(({ charId, char, spoiler, bookId }) => {
+                    if (spoiler) {
+                        const bookData = bookId ? bookMap[bookId] : null;
+                        return spoilerParentPill('child', charId, bookId, bookData, char);
+                    }
+                    return familyLifeLink(charId, char);
+                }).join(', ');
 
-                if (otherParentIds.length === 0) {
-                    // No other known parent
-                    const label = children.length === 1 ? 'Child' : 'Children';
+                const allSpoilers = children.every(c => c.spoiler);
+                const hasSpoilerCoParents = spoilerCoParents && spoilerCoParents.length > 0;
+                const label = children.length === 1 ? 'Child' : 'Children';
+                const hasAnyCoParent = otherParentIds.length > 0 || hasSpoilerCoParents;
+
+                if (!hasAnyCoParent) {
+                    // No other known parent — just show children (or their pills)
                     familyRows.push({ label, html: childLinks });
                 } else {
-                    // Show "with [Partner]" as the label; partner name is a familyCharLink
-                    const partnerHtml = otherParentIds.map(pid => {
-                        const partnerChar = characterMap[pid];
-                        return charLink(pid, partnerChar || { name: pid });
-                    }).join(' & ');
-                    const label = children.length === 1 ? 'Child' : 'Children';
+                    // Build the "with" line — revealed co-parents shown normally,
+                    // spoiler co-parents shown as pills (regardless of whether children are spoilers)
+                    const revealedPartnerHtml = otherParentIds.map(pid =>
+                        allSpoilers
+                            ? spoilerParentPill('coparent', pid, spoilerCoParents[0]?.bookId || null, spoilerCoParents[0]?.bookId ? bookMap[spoilerCoParents[0].bookId] : null, characterMap[pid] || null)
+                            : charLink(pid, characterMap[pid] || { name: pid })
+                    );
+                    const spoilerPartnerHtml = hasSpoilerCoParents
+                        ? spoilerCoParents.map(({ charId: pid, bookId }) => {
+                            const bookData = bookId ? bookMap[bookId] : null;
+                            return spoilerParentPill('coparent', pid, bookId, bookData, characterMap[pid] || null);
+                          })
+                        : [];
+                    const partnerHtml = [...revealedPartnerHtml, ...spoilerPartnerHtml].join(' & ');
                     familyRows.push({
                         label,
                         html: `<span class="family-with-partner">with ${partnerHtml}</span><br>${childLinks}`,
@@ -1313,6 +1446,21 @@ async function displayCharacterDetails(characterId) {
                 </dl>
             `;
             desc.appendChild(familyBox);
+
+            // Wire spoiler pill click handlers
+            familyBox.querySelectorAll('.spoiler-parent-pill').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const charId = btn.dataset.charId;
+                    const label  = btn.dataset.revealLabel;
+                    // Replace the pill with a clickable character name link
+                    const link = document.createElement('button');
+                    link.className = 'char-name-link';
+                    link.dataset.charId = charId;
+                    link.textContent = label;
+                    link.addEventListener('click', () => displayCharacterDetails(charId));
+                    btn.replaceWith(link);
+                });
+            });
         }
 
         // ── Ancestor Tree panel ─────────────────────────────────────────
@@ -1352,11 +1500,25 @@ async function displayCharacterDetails(characterId) {
                 const char = charData;
                 // Father first (left), mother second (right) for new schema
                 if (char && (char.father_id || char.mother_id)) {
-                    if (char.father_id && char.father_reveal !== false) {
-                        node.parents.push(buildNodes(char.father_id, characterMap[char.father_id] || null, depth + 1, maxDepth, 'father'));
+                    if (char.father_id) {
+                        if (char.father_reveal !== false) {
+                            node.parents.push(buildNodes(char.father_id, characterMap[char.father_id] || null, depth + 1, maxDepth, 'father'));
+                        } else if (char.father_book_id) {
+                            node.parents.push({ id: char.father_id, char: characterMap[char.father_id] || null,
+                                parents: [], _key: mkKey(char.father_id + '_sp'),
+                                _expanded: false, _subTree: null, _parentRole: 'father',
+                                _spoiler: true, _bookId: char.father_book_id });
+                        }
                     }
-                    if (char.mother_id && char.mother_reveal !== false) {
-                        node.parents.push(buildNodes(char.mother_id, characterMap[char.mother_id] || null, depth + 1, maxDepth, 'mother'));
+                    if (char.mother_id) {
+                        if (char.mother_reveal !== false) {
+                            node.parents.push(buildNodes(char.mother_id, characterMap[char.mother_id] || null, depth + 1, maxDepth, 'mother'));
+                        } else if (char.mother_book_id) {
+                            node.parents.push({ id: char.mother_id, char: characterMap[char.mother_id] || null,
+                                parents: [], _key: mkKey(char.mother_id + '_sp'),
+                                _expanded: false, _subTree: null, _parentRole: 'mother',
+                                _spoiler: true, _bookId: char.mother_book_id });
+                        }
                     }
                 } else {
                     // Legacy fallback
@@ -1381,6 +1543,21 @@ async function displayCharacterDetails(characterId) {
 
             // ── Render one node card's inner HTML ────────────────────────────
             function nodeCardHTML(node, depthFromRoot) {
+                if (node._spoiler) {
+                    const roleClass = node._parentRole === 'father' ? ' atree-node--father'
+                                    : node._parentRole === 'mother' ? ' atree-node--mother' : '';
+                    const bookData  = node._bookId ? bookMap[node._bookId] : null;
+                    const bookTitle = bookData ? escHtml(bookData.book_title) : null;
+                    const tipLabel  = bookTitle ? `Spoiler: revealed in ${bookTitle}` : 'Spoiler';
+                    const revealName = node.char ? escHtml(node.char.goes_by || node.char.name) : escHtml(node.id);
+                    return `<div class="atree-node atree-node--spoiler${roleClass}" data-node-key="${escHtml(node._key)}">
+                        <button class="atree-spoiler-btn"
+                                data-char-id="${escHtml(node.id)}"
+                                data-node-key="${escHtml(node._key)}"
+                                data-reveal-name="${revealName}"
+                                aria-label="Reveal spoiler ancestor">🔒 ${tipLabel}</button>
+                    </div>`;
+                }
                 const char  = node.char;
                 const label = char ? escHtml(char.goes_by || char.name) : escHtml(node.id);
                 const birthYear = char && char.birthday && char.birthday.year ? parseInt(char.birthday.year) : null;
@@ -1614,6 +1791,21 @@ async function displayCharacterDetails(characterId) {
                 container.querySelectorAll('.atree-expand-btn').forEach(btn => {
                     btn.addEventListener('click', () => handleExpand(btn.dataset.nodeKey));
                 });
+                container.querySelectorAll('.atree-spoiler-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const charId     = btn.dataset.charId;
+                        const revealName = btn.dataset.revealName;
+                        const nodeEl     = btn.closest('.atree-node');
+                        if (!nodeEl) return;
+                        const newCard = document.createElement('div');
+                        newCard.className = nodeEl.className.replace('atree-node--spoiler', '').trim();
+                        newCard.dataset.nodeKey = nodeEl.dataset.nodeKey;
+                        newCard.innerHTML = `<button class="atree-name-btn char-name-link" data-char-id="${escHtml(charId)}">${revealName}</button>`;
+                        newCard.querySelector('.atree-name-btn').addEventListener('click', () => displayCharacterDetails(charId));
+                        nodeEl.replaceWith(newCard);
+                        requestAnimationFrame(() => requestAnimationFrame(redrawAllConnectors));
+                    });
+                });
             }
 
             // ── Fetch ancestors 2 levels deep from a char, populating characterMap ──
@@ -1694,11 +1886,25 @@ async function displayCharacterDetails(characterId) {
                                             _key: mkKey('__syn__'), _expanded: false, _subTree: null };
                     // Father first (left), mother second (right)
                     if (char && (char.father_id || char.mother_id)) {
-                        if (char.father_id && char.father_reveal !== false) {
-                            syntheticRoot.parents.push(buildNodes(char.father_id, characterMap[char.father_id] || null, 0, 1, 'father'));
+                        if (char.father_id) {
+                            if (char.father_reveal !== false) {
+                                syntheticRoot.parents.push(buildNodes(char.father_id, characterMap[char.father_id] || null, 0, 1, 'father'));
+                            } else if (char.father_book_id) {
+                                syntheticRoot.parents.push({ id: char.father_id, char: characterMap[char.father_id] || null,
+                                    parents: [], _key: mkKey(char.father_id + '_sp'),
+                                    _expanded: false, _subTree: null, _parentRole: 'father',
+                                    _spoiler: true, _bookId: char.father_book_id });
+                            }
                         }
-                        if (char.mother_id && char.mother_reveal !== false) {
-                            syntheticRoot.parents.push(buildNodes(char.mother_id, characterMap[char.mother_id] || null, 0, 1, 'mother'));
+                        if (char.mother_id) {
+                            if (char.mother_reveal !== false) {
+                                syntheticRoot.parents.push(buildNodes(char.mother_id, characterMap[char.mother_id] || null, 0, 1, 'mother'));
+                            } else if (char.mother_book_id) {
+                                syntheticRoot.parents.push({ id: char.mother_id, char: characterMap[char.mother_id] || null,
+                                    parents: [], _key: mkKey(char.mother_id + '_sp'),
+                                    _expanded: false, _subTree: null, _parentRole: 'mother',
+                                    _spoiler: true, _bookId: char.mother_book_id });
+                            }
                         }
                     } else {
                         const pids = getParentIds(char).filter(Boolean);
@@ -1802,7 +2008,8 @@ async function displayCharacterDetails(characterId) {
 {
     const _dtAllChildren = Object.values(characterMap).filter(other => {
         if (other.id === characterId) return false;
-        return new Set(getParentIds(other).filter(p => p && p.trim())).has(characterId);
+        // Use getAllParentIds so characters who are unrevealed parents still get a tree
+        return new Set(getAllParentIds(other).filter(p => p && p.trim())).has(characterId);
     });
 
     if (_dtAllChildren.length > 0) {
@@ -1850,8 +2057,19 @@ async function displayCharacterDetails(characterId) {
                  + (date ? `<span class="atree-dates">${date}</span>` : '');
         }
 
+        function dtSpoilerNodeInner(id, c, bookId) {
+            const bookData  = bookId ? bookMap[bookId] : null;
+            const bookTitle = bookData ? escHtml(bookData.book_title) : null;
+            const label     = bookTitle ? `Spoiler: revealed in ${bookTitle}` : 'Spoiler';
+            const revealName = c ? escHtml(c.goes_by || c.name) : escHtml(id);
+            return `<button class="dtree-spoiler-btn"
+                            data-char-id="${escHtml(id)}"
+                            data-reveal-name="${revealName}"
+                            aria-label="Reveal spoiler">🔒 ${label}</button>`;
+        }
+
         const dtByBirth = (a, b) => {
-            const ba = a.char.birthday||{}, bb = b.char.birthday||{};
+            const ba = (a.char && a.char.birthday)||{}, bb = (b.char && b.char.birthday)||{};
             const ya = parseInt(ba.year)||0,  yb = parseInt(bb.year)||0;
             if (ya !== yb) return ya - yb;
             const ta = parseInt(ba.tritquarter)||0, tb = parseInt(bb.tritquarter)||0;
@@ -1863,16 +2081,29 @@ async function displayCharacterDetails(characterId) {
             const map = new Map();
             Object.values(characterMap).forEach(o => {
                 if (o.id === parentId) return;
-                // Use getParentIds (revealed only) — if parentId is unrevealed on this
-                // child's record, that child must not appear in parentId's descendant tree.
+                // Use getAllParentIds so children where parentId is unrevealed still appear
+                const allParents = new Set(getAllParentIds(o).filter(p => p && p.trim()));
+                if (!allParents.has(parentId)) return;
                 const revealedParents = new Set(getParentIds(o).filter(p => p && p.trim()));
-                if (!revealedParents.has(parentId)) return;
-                // Co-parents are also revealed-only: don't show a co-parent whose
-                // identity is flagged as a spoiler on this child's record.
+                // Revealed co-parents shown normally; spoiler co-parents tracked separately
                 const cops = [...revealedParents].filter(p => p !== parentId).sort();
-                const key  = cops.join('|') || '__none__';
-                if (!map.has(key)) map.set(key, { cops, children: [] });
-                map.get(key).children.push({ charId: o.id, char: o });
+                const spoilerCops = [...allParents].filter(p => p !== parentId && isParentUnrevealed(o, p));
+                // Flag child as spoiler if parentId is unrevealed on the child record
+                const isSpoiler = isParentUnrevealed(o, parentId);
+                const childBookId = isSpoiler
+                    ? (o.father_id === parentId ? o.father_book_id : o.mother_book_id) || null
+                    : null;
+                // Group key uses revealed cops only (spoiler cops tracked on the group)
+                const key = cops.join('|') || '__none__';
+                if (!map.has(key)) {
+                    // Compute bookId for each spoiler co-parent from the child record
+                    const spoilerCopEntries = spoilerCops.map(pid => ({
+                        charId: pid,
+                        bookId: (o.father_id === pid ? o.father_book_id : o.mother_book_id) || null,
+                    }));
+                    map.set(key, { cops, spoilerCops: spoilerCopEntries, children: [] });
+                }
+                map.get(key).children.push({ charId: o.id, char: o, spoiler: isSpoiler, bookId: childBookId });
             });
             const gs = [...map.values()];
             gs.forEach(g => g.children.sort(dtByBirth));
@@ -1889,10 +2120,10 @@ async function displayCharacterDetails(characterId) {
         }
 
         function dtHasKids(id) {
-            // Only count children where this character's parenthood is revealed
+            // Count ALL children including those where this char is an unrevealed parent
             return Object.values(characterMap).some(o => {
                 if (o.id === id) return false;
-                return new Set(getParentIds(o).filter(p => p && p.trim())).has(id);
+                return new Set(getAllParentIds(o).filter(p => p && p.trim())).has(id);
             });
         }
 
@@ -1943,9 +2174,20 @@ async function displayCharacterDetails(characterId) {
         //   - the corresponding co-parent card in .dtree-cop-stack as co-parent
         // This way both are in the same .dtree-child-wrap and getBoundingClientRect works.
 
-        function dtChildCard(charId, char, groups, expandedSet, copKey) {
+        function dtChildCard(charId, char, groups, expandedSet, copKey, spoiler, bookId) {
             // groups = all co-parent groups for this child
             // copKey = the co-parent group key from the PARENT's perspective (for root-level SVG tagging)
+            // spoiler/bookId: if true, render a locked spoiler card instead of the name
+            if (spoiler) {
+                const revealName = char ? escHtml(char.goes_by || char.name) : escHtml(charId);
+                return `<div class="dtree-child-wrap" data-child-id="${escHtml(charId)}"${copKey ? ` data-cop-key="${escHtml(copKey)}"` : ''}>
+                    <div class="dtree-child-and-cops">
+                        <div class="dtree-node dtree-node--spoiler" data-dtree-child-id="${escHtml(charId)}">
+                            ${dtSpoilerNodeInner(charId, char, bookId)}
+                        </div>
+                    </div>
+                </div>`;
+            }
             const cls     = dtPronounClass(char);
             const hasKids = dtHasKids(charId);
             const isOpen  = expandedSet.has(charId);
@@ -1961,27 +2203,46 @@ async function displayCharacterDetails(characterId) {
             let subtreeHtml  = '';
             if (isOpen && groups.length > 0) {
                 const seenSubCops = new Set();
-                copStackHtml = groups.flatMap(({ cops }) => {
-                    const gKey = cops.slice().sort().join('|') || '__none__';
-                    return cops.filter(pid => {
+                copStackHtml = groups.flatMap(({ cops, spoilerCops, children }) => {
+                    const allCopIds = [...cops, ...(spoilerCops || []).map(s => s.charId)].sort();
+                    const gKey = allCopIds.join('|') || '__none__';
+                    const allChildrenSpoilers = children.length > 0 && children.every(c => c.spoiler);
+                    const firstChildBookId = allChildrenSpoilers ? (children[0].bookId || null) : null;
+                    const revealedCards = cops.filter(pid => {
                         if (seenSubCops.has(pid)) return false;
                         seenSubCops.add(pid); return true;
                     }).map(pid => {
                         const cp = characterMap[pid] || null;
+                        if (allChildrenSpoilers) {
+                            return `<div class="dtree-node dtree-node--spoiler"
+                                         data-char-id="${escHtml(pid)}"
+                                         data-cop-key="${escHtml(gKey)}">${dtSpoilerNodeInner(pid, cp, firstChildBookId)}</div>`;
+                        }
                         return `<div class="dtree-node ${dtPronounClass(cp)}"
                                      data-char-id="${escHtml(pid)}"
                                      data-cop-key="${escHtml(gKey)}">${dtNodeInner(pid, cp)}</div>`;
                     });
+                    const spoilerCards = (spoilerCops || []).filter(({ charId: pid }) => {
+                        if (seenSubCops.has(pid)) return false;
+                        seenSubCops.add(pid); return true;
+                    }).map(({ charId: pid, bookId }) => {
+                        const cp = characterMap[pid] || null;
+                        return `<div class="dtree-node dtree-node--spoiler"
+                                     data-char-id="${escHtml(pid)}"
+                                     data-cop-key="${escHtml(gKey)}">${dtSpoilerNodeInner(pid, cp, bookId)}</div>`;
+                    });
+                    return [...revealedCards, ...spoilerCards];
                 }).join('');
 
                 // All grandchildren merged into one row, tagged with cop-key
-                const allGrandchildren = groups.flatMap(({ cops, children }) => {
-                    const gKey = cops.slice().sort().join('|') || '__none__';
+                const allGrandchildren = groups.flatMap(({ cops, spoilerCops, children }) => {
+                    const allCopIds = [...cops, ...(spoilerCops || []).map(s => s.charId)].sort();
+                    const gKey = allCopIds.join('|') || '__none__';
                     return children.map(ch => ({ ...ch, gKey }));
                 });
                 allGrandchildren.sort(dtByBirth);
-                const grandKidCards = allGrandchildren.map(({ charId: cid, char: cc, gKey }) =>
-                    dtChildCard(cid, cc, dtGroups(cid), expandedSet, gKey)
+                const grandKidCards = allGrandchildren.map(({ charId: cid, char: cc, gKey, spoiler: sp, bookId: bk }) =>
+                    dtChildCard(cid, cc, dtGroups(cid), expandedSet, gKey, sp, bk)
                 ).join('');
 
                 subtreeHtml = `<div class="dtree-sub-group" data-sub-group-parent="${escHtml(charId)}">
@@ -1989,7 +2250,7 @@ async function displayCharacterDetails(characterId) {
                 </div>`;
             }
 
-            const hasCops = isOpen && groups.some(g => g.cops.length > 0);
+            const hasCops = isOpen && groups.some(g => g.cops.length > 0 || (g.spoilerCops && g.spoilerCops.length > 0));
 
             return `<div class="dtree-child-wrap" data-child-id="${escHtml(charId)}"${copKey ? ` data-cop-key="${escHtml(copKey)}"` : ''}>
                 <div class="dtree-child-and-cops${hasCops ? ' dtree-child-and-cops--has-cops' : ''}">
@@ -2005,6 +2266,9 @@ async function displayCharacterDetails(characterId) {
         // Full top-level render
         function dtRender(expandedSet) {
             const groups = dtGroups(characterId);
+            // groups may be empty for characters who are only unrevealed parents —
+            // dtGroups still returns a group with spoiler children in that case.
+            // Only bail if truly no children at all.
             if (!groups.length) { dTreeRoot.innerHTML = ''; return; }
 
             // One coupling row: subject + all unique co-parents (tagged with data-cop-key).
@@ -2020,29 +2284,52 @@ async function displayCharacterDetails(characterId) {
             </div>`;
 
             // Co-parent cards — tagged with the co-parent group key
+            // Revealed co-parents shown normally; spoiler co-parents shown as locked cards
             const seenCops = new Set();
-            const allCopCards = groups.flatMap(({ cops }) => {
-                const gKey = cops.slice().sort().join('|') || '__none__';
-                return cops.filter(pid => {
+            const allCopCards = groups.flatMap(({ cops, spoilerCops, children }) => {
+                const allCopIds = [...cops, ...(spoilerCops || []).map(s => s.charId)].sort();
+                const gKey = allCopIds.join('|') || '__none__';
+                // If ALL children in this group are spoilers, treat revealed co-parents
+                // as spoilers too — showing them would reveal the secret relationship
+                const allChildrenSpoilers = children.length > 0 && children.every(c => c.spoiler);
+                const firstChildBookId = allChildrenSpoilers ? (children[0].bookId || null) : null;
+                const revealedCards = cops.filter(pid => {
                     if (seenCops.has(pid)) return false;
                     seenCops.add(pid); return true;
                 }).map(pid => {
                     const c = characterMap[pid] || null;
+                    if (allChildrenSpoilers) {
+                        // Demote to spoiler card using the children's book ID
+                        return `<div class="dtree-node dtree-node--spoiler"
+                                     data-char-id="${escHtml(pid)}"
+                                     data-cop-key="${escHtml(gKey)}">${dtSpoilerNodeInner(pid, c, firstChildBookId)}</div>`;
+                    }
                     return `<div class="dtree-node ${dtPronounClass(c)}"
                                  data-char-id="${escHtml(pid)}"
                                  data-cop-key="${escHtml(gKey)}">${dtNodeInner(pid, c)}</div>`;
                 });
+                const spoilerCards = (spoilerCops || []).filter(({ charId: pid }) => {
+                    if (seenCops.has(pid)) return false;
+                    seenCops.add(pid); return true;
+                }).map(({ charId: pid, bookId }) => {
+                    const c = characterMap[pid] || null;
+                    return `<div class="dtree-node dtree-node--spoiler"
+                                 data-char-id="${escHtml(pid)}"
+                                 data-cop-key="${escHtml(gKey)}">${dtSpoilerNodeInner(pid, c, bookId)}</div>`;
+                });
+                return [...revealedCards, ...spoilerCards];
             }).join('');
 
             // All children merged and sorted by birth, each tagged with their group key
-            const allChildren = groups.flatMap(({ cops, children }) => {
-                const gKey = cops.slice().sort().join('|') || '__none__';
+            const allChildren = groups.flatMap(({ cops, spoilerCops, children }) => {
+                const allCopIds = [...cops, ...(spoilerCops || []).map(s => s.charId)].sort();
+                const gKey = allCopIds.join('|') || '__none__';
                 return children.map(ch => ({ ...ch, gKey }));
             });
             allChildren.sort(dtByBirth);
 
-            const kidCards = allChildren.map(({ charId, char, gKey }) =>
-                dtChildCard(charId, char, dtGroups(charId), expandedSet, gKey)
+            const kidCards = allChildren.map(({ charId, char, gKey, spoiler, bookId }) =>
+                dtChildCard(charId, char, dtGroups(charId), expandedSet, gKey, spoiler, bookId)
             ).join('');
 
             const html = `<div class="dtree-group dtree-group--root">
@@ -2403,6 +2690,45 @@ async function displayCharacterDetails(characterId) {
             dTreeRoot.querySelectorAll('.atree-name-btn').forEach(btn => {
                 btn.addEventListener('click', () => displayCharacterDetails(btn.dataset.charId));
             });
+            // Spoiler node reveal — swap locked card for a real name card in-place
+            // Works for both child cards and coupling-row co-parent cards
+            dTreeRoot.querySelectorAll('.dtree-spoiler-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const charId     = btn.dataset.charId;
+                    const revealName = btn.dataset.revealName;
+                    const nodeEl     = btn.closest('.dtree-node');
+                    if (!nodeEl) return;
+                    const newCard = document.createElement('div');
+                    const baseClass = nodeEl.className.replace('dtree-node--spoiler', '').trim();
+                    newCard.className = (baseClass + ' ' + dtPronounClass(characterMap[charId] || null)).trim();
+                    // Preserve data attributes for SVG connector targeting
+                    if (nodeEl.dataset.dtreeChildId) newCard.dataset.dtreeChildId = nodeEl.dataset.dtreeChildId;
+                    if (nodeEl.dataset.copKey)       newCard.dataset.copKey       = nodeEl.dataset.copKey;
+                    if (nodeEl.dataset.charId)       newCard.dataset.charId       = nodeEl.dataset.charId;
+                    newCard.innerHTML = dtNodeInner(charId, characterMap[charId] || null);
+                    newCard.querySelector('.atree-name-btn').addEventListener('click', () => displayCharacterDetails(charId));
+                    nodeEl.replaceWith(newCard);
+                    requestAnimationFrame(() => requestAnimationFrame(dtRedrawAll));
+                });
+            });
+            dTreeRoot.querySelectorAll('.dtree-spoiler-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const charId     = btn.dataset.charId;
+                    const revealName = btn.dataset.revealName;
+                    const nodeEl     = btn.closest('.dtree-node');
+                    if (!nodeEl) return;
+                    const newCard = document.createElement('div');
+                    const baseClass = nodeEl.className.replace('dtree-node--spoiler', '').trim();
+                    newCard.className = (baseClass + ' ' + dtPronounClass(characterMap[charId] || null)).trim();
+                    if (nodeEl.dataset.dtreeChildId) newCard.dataset.dtreeChildId = nodeEl.dataset.dtreeChildId;
+                    if (nodeEl.dataset.copKey)       newCard.dataset.copKey       = nodeEl.dataset.copKey;
+                    if (nodeEl.dataset.charId)       newCard.dataset.charId       = nodeEl.dataset.charId;
+                    newCard.innerHTML = dtNodeInner(charId, characterMap[charId] || null);
+                    newCard.querySelector('.atree-name-btn').addEventListener('click', () => displayCharacterDetails(charId));
+                    nodeEl.replaceWith(newCard);
+                    requestAnimationFrame(() => requestAnimationFrame(dtRedrawAll));
+                });
+            });
             dTreeRoot.querySelectorAll('.dtree-expand-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const id = btn.dataset.dtreeExpandId;
@@ -2440,7 +2766,10 @@ async function displayCharacterDetails(characterId) {
     }
 }
 // END Descendant Tree panel
-        desc.insertAdjacentHTML('afterbegin', data.description || 'No description available.');
+        desc.insertAdjacentHTML('afterbegin', parseDescriptionLinks(data.description || 'No description available.'));
+
+        // ── Wire up in-description nav links ────────────────────────────────
+        wireDescriptionLinks(desc, 'character', characterId);
 
         // ── Wire up all char-name-link buttons (parents, relationships, etc.) 
         el.querySelectorAll('.char-name-link').forEach(btn => {
@@ -3657,7 +3986,8 @@ async function displayCountryDetails(countryId) {
 
         // ── Description ──────────────────────────────────────────────────────
         if (data.ctry_description) {
-            rightCol.insertAdjacentHTML('afterbegin', data.ctry_description);
+            rightCol.insertAdjacentHTML('afterbegin', parseDescriptionLinks(data.ctry_description));
+            wireDescriptionLinks(rightCol, 'country', countryId);
         }
 
     } catch (error) {
@@ -3784,7 +4114,8 @@ async function displayCityDetails(cityId, fromPage, fromId) {
 
         // ── Description ──────────────────────────────────────────────────────
         if (data.city_desc) {
-            rightCol.insertAdjacentHTML('afterbegin', data.city_desc);
+            rightCol.insertAdjacentHTML('afterbegin', parseDescriptionLinks(data.city_desc));
+            wireDescriptionLinks(rightCol, 'city', cityId);
         }
 
     } catch (error) {
@@ -3843,7 +4174,7 @@ async function displaySpeciesList() {
             item.style.cursor = 'pointer';
 
             const snippet = species.sp_description
-                ? escHtml(stripHtml(species.sp_description).slice(0, 120)) + (stripHtml(species.sp_description).length > 120 ? '…' : '')
+                ? escHtml(stripHtml(species.sp_description.replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1')).slice(0, 120)) + (stripHtml(species.sp_description).length > 120 ? '…' : '')
                 : '';
 
             // Portrait image — mirrors character card pattern
@@ -4001,7 +4332,8 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
 
         // ── Description ──────────────────────────────────────────────────────
         if (data.sp_description) {
-            rightCol.insertAdjacentHTML('afterbegin', data.sp_description);
+            rightCol.insertAdjacentHTML('afterbegin', parseDescriptionLinks(data.sp_description));
+            wireDescriptionLinks(rightCol, 'species', speciesId);
         }
 
         // ── Subspecies cards ─────────────────────────────────────────────────

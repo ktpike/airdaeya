@@ -11,19 +11,19 @@
   "scope": "/",
   "icons": [
     {
-      "src": "https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Logos%2FAirdaeium%20logo%20180.png?alt=media&token=c64b73a5-5011-4ab6-8a98-40dd83b62823",
+      "src": "https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Logos%2FAirdaeium%20logo%20180.png?alt=media&token=910f26be-fbb1-459d-ae7b-65ecad30c6bc",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Logos%2FAirdaeium%20logo%20192.png?alt=media&token=e1a977cb-4809-4f90-a91f-3b2184f947e5",
+      "src": "https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Logos%2FAirdaeium%20logo%20192.png?alt=media&token=be8f3338-6d9b-4d34-a183-4d195f8a411f",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Logos%2FAirdaeium%20logo%20512.png?alt=media&token=f97ea87a-1590-44d4-b833-addf12813944",
+      "src": "https://firebasestorage.googleapis.com/v0/b/airdaeya.firebasestorage.app/o/Logos%2FAirdaeium%20logo%20512.png?alt=media&token=3e0a849d-ba37-452b-a823-3aaf1b73c006",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
