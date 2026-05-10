@@ -393,9 +393,23 @@ body {
     font-size: 1.05em;
     line-height: 1.7;
     color: var(--text-color);
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
+}
+
+.character-detail-description p {
+    margin-top: 0;
+    margin-bottom: 0.75em;
+}
+
+.character-detail-description p:last-child {
+    margin-bottom: 0;
+}
+
+/* Restore spacing for block-level children (family box, ancestor tree, etc.) */
+.character-detail-description .character-family-box,
+.character-detail-description .atree-section,
+.character-detail-description .dtree-section,
+.character-detail-description .desc-list {
+    margin-top: 16px;
 }
 
 /* --- Family Box (siblings, children) in right column --- */
@@ -587,6 +601,81 @@ body {
 .info-species-link:hover,
 .desc-nav-link:hover {
     opacity: 0.75;
+}
+
+/* --- Description Section Headers (## syntax in Firestore descriptions) --- */
+.desc-section-header {
+    font-family: var(--font-display);
+    font-size: 0.82em;
+    font-weight: 400;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--primary-color);
+    text-align: left;
+    margin-top: 1.2em;
+    margin-bottom: 0.25em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid rgba(69,35,69,0.25);
+}
+
+/* Suppress extra gap from the <p> sitting just before a header */
+p:has(+ .desc-section-header),
+p:has(+ .desc-subsection-header) {
+    margin-bottom: 0;
+}
+
+.dark-mode .desc-section-header {
+    color: #FFD700;
+    border-bottom-color: rgba(255,215,0,0.3);
+}
+
+/* --- Description Sub-Section Headers (### syntax) --- */
+.desc-subsection-header {
+    font-family: var(--font-header);
+    font-size: 0.88em;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--secondary-color);
+    text-align: left;
+    margin-top: 0.75em;
+    margin-bottom: 0.15em;
+}
+
+.dark-mode .desc-subsection-header {
+    color: rgba(195,177,133,0.85);
+}
+
+/* --- Description Bullet Lists (* syntax) --- */
+.desc-list {
+    margin: 0.3em 0 0.3em 1.4em;
+    padding: 0;
+    font-family: var(--font-serif);
+    font-size: 1em;
+    line-height: 1.6;
+    color: var(--text-color);
+}
+
+.desc-list-item {
+    margin-bottom: 0.3em;
+}
+
+.desc-list-item:last-child {
+    margin-bottom: 0;
+}
+
+/* *- list ender — invisible spacer that resets context after a bullet list */
+.desc-list-end {
+    display: block;
+    height: 0;
+    margin: 0;
+    padding: 0;
+}
+
+/* h4 sub-headers that follow a bullet list should not inherit indentation */
+.desc-list + .desc-subsection-header,
+.desc-list-end + .desc-subsection-header {
+    margin-left: 0;
 }
 
 .book-role-note {

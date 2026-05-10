@@ -122,6 +122,7 @@ function addAppTracking(url, campaign = 'general') {
 //   [[city:city_stragos|Stragos]]         → navigates to city detail
 //   [[country:ctry_merkama|the Merkama]]  → navigates to country detail
 //   [[species:s_elf|Elf]]                 → navigates to species detail
+//   [[subspecies:ss_foo|Foo]]            → resolves parent species, navigates to species detail
 //
 // Usage:
 //   1. Call parseDescriptionLinks(rawHtml) to convert shorthand → anchor tags
@@ -132,8 +133,35 @@ function addAppTracking(url, campaign = 'general') {
 
 function parseDescriptionLinks(html) {
     if (!html) return html;
+    // Step 1: Convert *- list ender FIRST — before any other pass consumes surrounding <br>s.
+    // Use a real HTML tag as placeholder so the <li> lookahead stops at it.
+    html = html.replace(/(?:<br\s*\/?>|<p>|\n)\s*\*-\s*(?:<br\s*\/?>|\n|$)/gi, '<hr class="desc-list-end">');
+    // Step 2: Convert ## Heading into h3 section headers.
+    html = html.replace(
+        /(?:<p>|<br\s*\/?>|\n|<hr class="desc-list-end">)\s*##\s+(.+?)(?=\s*<br\s*\/?>|\s*<\/p>|\s*\n|$)/gi,
+        (match, text) => `<h3 class="desc-section-header">${text.trim()}</h3>`
+    );
+    // Step 3: Convert ### Sub-heading into h4 sub-section headers.
+    html = html.replace(
+        /(?:<p>|<br\s*\/?>|\n|<hr class="desc-list-end">)\s*###\s+(.+?)(?=\s*<br\s*\/?>|\s*<\/p>|\s*\n|$)/gi,
+        (match, text) => `<h4 class="desc-subsection-header">${text.trim()}</h4>`
+    );
+    // Step 4: Strip any <br> immediately following a header (leftover from lookahead).
+    html = html.replace(/(<\/h[34]>)\s*<br\s*\/?>/gi, '$1');
+    // Step 5: Convert "* text" bullet lines into <li> elements.
+    // Requires a space after * to avoid matching <br><b>bold</b> inline text.
+    // Lookahead stops at <br>, </p>, <hr>, <h3>, <h4>, \n, or end of string.
+    html = html.replace(
+        /(?:<br\s*\/?>|<p>|\n|(?<=<\/h[34]>)|(?<=<hr class="desc-list-end">))\s*\*\s+(.+?)(?=\s*<br\s*\/?>|\s*<\/p>|\s*<hr|\s*<h[34]|\s*\n|$)/gi,
+        (match, text) => `<li class="desc-list-item">${text.trim()}</li>`
+    );
+    // Step 6: Wrap consecutive <li> elements in a <ul>.
+    // <hr class="desc-list-end"> breaks the sequence so separate lists don't merge.
+    html = html.replace(/(<li class="desc-list-item">(?:.*?)<\/li>)+/gs,
+        match => `<ul class="desc-list">${match}</ul>`
+    );
     return html.replace(
-        /\[\[(character|city|country|species):([^\]|]+)\|([^\]]+)\]\]/g,
+        /\[\[(character|city|country|species|subspecies):([^\]|]+)\|([^\]]+)\]\]/g,
         (match, type, id, label) => {
             const safeId    = id.trim();
             const safeLabel = label.trim();
@@ -152,8 +180,16 @@ function wireDescriptionLinks(containerEl, contextPage, contextId) {
             const id   = link.dataset.navId;
             if (type === 'character') displayCharacterDetails(id);
             else if (type === 'city')    displayCityDetails(id, contextPage, contextId);
-            else if (type === 'country') displayCountryDetails(id);
+            else if (type === 'country') displayCountryDetails(id, contextPage, contextId);
             else if (type === 'species') displaySpeciesDetails(id, contextPage, contextId);
+            else if (type === 'subspecies') {
+                // Resolve the parent species_id from the subspecies doc, then navigate
+                db.collection('subspecies').doc(id).get().then(ssDoc => {
+                    if (ssDoc.exists && ssDoc.data().species_id) {
+                        displaySpeciesDetails(ssDoc.data().species_id, contextPage, contextId);
+                    }
+                });
+            }
         });
     });
 }
@@ -722,15 +758,20 @@ function appendCharacterCard(container, charData, released = true) {
     const nameEl = document.createElement('h3');
     nameEl.textContent = charData.name;
 
-    const descEl = document.createElement('p');
-    const rawDesc = charData.description || 'No description available.';
+    const rawDesc = charData.description || '';
     const plainDesc = rawDesc
         .replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1') // strip [[type:id|Label]] → Label
         .replace(/<[^>]*>/g, '');                    // strip HTML tags
-    descEl.textContent = plainDesc.length > 150 ? plainDesc.substring(0, 150) + '...' : plainDesc;
+
+    const descEl = document.createElement('p');
+    if (plainDesc.trim()) {
+        descEl.textContent = plainDesc.length > 150 ? plainDesc.substring(0, 150) + '...' : plainDesc;
+    } else {
+        nameEl.style.textAlign = 'center';
+    }
 
     text.appendChild(nameEl);
-    text.appendChild(descEl);
+    if (plainDesc.trim()) text.appendChild(descEl);
     item.appendChild(text);
     container.appendChild(item);
 }
@@ -1845,6 +1886,15 @@ async function displayCharacterDetails(characterId) {
                 return null;
             }
 
+            // ── Recursively reset _expanded on a subtree's data nodes ────────
+            // Called when collapsing so that re-expanding always renders fresh arrows.
+            function resetExpandedState(node) {
+                if (!node) return;
+                node._expanded = false;
+                node.parents.forEach(resetExpandedState);
+                if (node._subTree) resetExpandedState(node._subTree);
+            }
+
             // ── Handle expand/collapse of a node ────────────────────────────
             async function handleExpand(nodeKey) {
                 const node = findNode(rootTreeNode, nodeKey);
@@ -1857,6 +1907,9 @@ async function displayCharacterDetails(characterId) {
                 // Toggle collapse if already expanded
                 if (node._expanded) {
                     node._expanded = false;
+                    // Reset all descendant expanded states so re-expanding renders
+                    // correct (▲) arrows on nodes whose subtrees are no longer visible.
+                    if (node._subTree) resetExpandedState(node._subTree);
                     const wrap = nodeEl.closest('.atree-node-wrap');
                     const subWrap = wrap ? wrap.querySelector('.atree-subtree-wrap') : null;
                     if (subWrap) subWrap.style.display = 'none';
@@ -3825,9 +3878,12 @@ async function displayWorldMap() {
             pin.appendChild(dot);
             pin.appendChild(label);
 
-            pin.addEventListener('click', () => {
-                displayMoonTracker(doc.id);
-            });
+            if (city.city_desc) {
+                pin.style.cursor = 'pointer';
+                pin.addEventListener('click', () => {
+                    displayCityDetails(doc.id);
+                });
+            }
 
             mapWrapper.appendChild(pin);
         });
@@ -3846,7 +3902,7 @@ async function displayWorldMap() {
 // 14. Country Details
 // =================================================================================
 
-async function displayCountryDetails(countryId) {
+async function displayCountryDetails(countryId, fromPage, fromId) {
     const el = getContainer();
     if (!el) return;
     el.innerHTML = `<h2>Loading...</h2>`;
@@ -3908,16 +3964,23 @@ async function displayCountryDetails(countryId) {
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         }
 
+        // ── Back button: return to character if came from one, else world map ──
+        const backLabel = fromPage === 'character' ? '← Back to Character' : '← Back to Map';
+        function handleBack() {
+            if (fromPage === 'character' && fromId) displayCharacterDetails(fromId);
+            else displayWorldMap();
+        }
+
         // ── Render shell ────────────────────────────────────────────────────
         el.innerHTML = `
-            <button class="back-button" id="back-to-map-btn">← Back to Map</button>
+            <button class="back-button" id="back-to-map-btn">${escHtml(backLabel)}</button>
             <h1 class="character-detail-name">${escHtml(data.ctry_name || countryId)}</h1>
             <div class="character-detail-content">
                 <div class="character-detail-left" id="country-left"></div>
                 <div class="character-detail-description" id="country-right"></div>
             </div>
         `;
-        document.getElementById('back-to-map-btn').addEventListener('click', displayWorldMap);
+        document.getElementById('back-to-map-btn').addEventListener('click', handleBack);
 
         const leftCol  = document.getElementById('country-left');
         const rightCol = document.getElementById('country-right');
