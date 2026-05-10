@@ -612,7 +612,7 @@ body {
     text-transform: uppercase;
     color: var(--primary-color);
     text-align: left;
-    margin-top: 1.2em;
+    margin-top: 1.8em;
     margin-bottom: 0.25em;
     padding-bottom: 0.3em;
     border-bottom: 1px solid rgba(69,35,69,0.25);
@@ -638,7 +638,7 @@ p:has(+ .desc-subsection-header) {
     text-transform: uppercase;
     color: var(--secondary-color);
     text-align: left;
-    margin-top: 0.75em;
+    margin-top: 1.2em;
     margin-bottom: 0.15em;
 }
 
@@ -3177,4 +3177,39 @@ h1.character-detail-name {
 @media (max-width: 600px) {
     .dtree-node { min-width: 95px; padding: 6px 10px 5px; }
     .dtree-node:has(.dtree-expand-btn) { padding-bottom: 12px; }
+}
+/* --- Scroll-to-top button --- */
+.scroll-top-btn {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(69,35,69,0.35);
+    background: var(--bg-color);
+    color: var(--primary-color);
+    font-size: 1.2em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease, box-shadow 0.2s ease;
+    z-index: 900;
+}
+.scroll-top-btn.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.scroll-top-btn:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    transform: translateY(-2px);
+}
+.dark-mode .scroll-top-btn {
+    border-color: rgba(255,215,0,0.3);
+    color: #FFD700;
+    background: var(--surface-color);
 }

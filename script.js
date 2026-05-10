@@ -121,6 +121,7 @@ function addAppTracking(url, campaign = 'general') {
 //   [[character:c_starshine|Starshine]]   → navigates to character detail
 //   [[city:city_stragos|Stragos]]         → navigates to city detail
 //   [[country:ctry_merkama|the Merkama]]  → navigates to country detail
+//   [[continent:cont_kish|Kish]]          → navigates to continent detail
 //   [[species:s_elf|Elf]]                 → navigates to species detail
 //   [[subspecies:ss_foo|Foo]]            → resolves parent species, navigates to species detail
 //
@@ -161,7 +162,7 @@ function parseDescriptionLinks(html) {
         match => `<ul class="desc-list">${match}</ul>`
     );
     return html.replace(
-        /\[\[(character|city|country|species|subspecies):([^\]|]+)\|([^\]]+)\]\]/g,
+        /\[\[(character|city|country|continent|species|subspecies):([^\]|]+)\|([^\]]+)\]\]/g,
         (match, type, id, label) => {
             const safeId    = id.trim();
             const safeLabel = label.trim();
@@ -178,10 +179,11 @@ function wireDescriptionLinks(containerEl, contextPage, contextId) {
             e.preventDefault();
             const type = link.dataset.navType;
             const id   = link.dataset.navId;
-            if (type === 'character') displayCharacterDetails(id);
-            else if (type === 'city')    displayCityDetails(id, contextPage, contextId);
-            else if (type === 'country') displayCountryDetails(id, contextPage, contextId);
-            else if (type === 'species') displaySpeciesDetails(id, contextPage, contextId);
+            if (type === 'character') displayCharacterDetails(id, contextPage, contextId);
+            else if (type === 'city')      displayCityDetails(id, contextPage, contextId);
+            else if (type === 'country')   displayCountryDetails(id, contextPage, contextId);
+            else if (type === 'continent') displayContinentDetails(id, contextPage, contextId);
+            else if (type === 'species')   displaySpeciesDetails(id, contextPage, contextId);
             else if (type === 'subspecies') {
                 // Resolve the parent species_id from the subspecies doc, then navigate
                 db.collection('subspecies').doc(id).get().then(ssDoc => {
@@ -780,7 +782,7 @@ function appendCharacterCard(container, charData, released = true) {
 // 9. Character Details
 // =================================================================================
 
-async function displayCharacterDetails(characterId) {
+async function displayCharacterDetails(characterId, fromPage, fromId) {
     const el = getContainer();
     if (!el) return;
     el.innerHTML = `<h2>Loading character details...</h2>`;
@@ -1307,9 +1309,23 @@ async function displayCharacterDetails(characterId) {
             ? (Array.isArray(data.c_titles) ? data.c_titles : [data.c_titles])
                 .map(t => `<div class="character-name-title">${escHtml(t)}</div>`).join('') : '';
 
+        // ── Back button ──────────────────────────────────────────────────────
+        const backLabel = fromPage === 'country'   ? '← Back to Country'
+                        : fromPage === 'city'      ? '← Back to City'
+                        : fromPage === 'continent' ? '← Back to Continent'
+                        : fromPage === 'species'   ? '← Back to Species'
+                        : '← Back to Character List';
+        function handleBack() {
+            if      (fromPage === 'country'   && fromId) displayCountryDetails(fromId);
+            else if (fromPage === 'city'      && fromId) displayCityDetails(fromId);
+            else if (fromPage === 'continent' && fromId) displayContinentDetails(fromId);
+            else if (fromPage === 'species'   && fromId) displaySpeciesDetails(fromId);
+            else displayCharacterList();
+        }
+
         // ── Render page ─────────────────────────────────────────────────────
         el.innerHTML = `
-            <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
+            <button class="back-button" id="back-to-list-btn">${backLabel}</button>
             <div class="character-detail-name-block">
                 <h1 class="character-detail-name">${prefix}${escHtml(data.name)}</h1>
                 ${suffix}${goesBy}${titlesHtml}
@@ -1319,7 +1335,7 @@ async function displayCharacterDetails(characterId) {
                 <div class="character-detail-description"></div>
             </div>
         `;
-        document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
+        document.getElementById('back-to-list-btn').addEventListener('click', handleBack);
 
         // ── Portrait ────────────────────────────────────────────────────────
         const wrapper = el.querySelector('.character-detail-left');
@@ -2850,10 +2866,16 @@ async function displayCharacterDetails(characterId) {
     } catch (error) {
         console.error("Error fetching character details:", error);
         el.innerHTML = `
-            <button class="back-button" id="back-to-list-btn">← Back to Character List</button>
+            <button class="back-button" id="back-to-list-btn">← Back</button>
             <h2>Error loading character details!</h2>
         `;
-        document.getElementById('back-to-list-btn').addEventListener('click', displayCharacterList);
+        document.getElementById('back-to-list-btn').addEventListener('click', () => {
+            if      (fromPage === 'country'   && fromId) displayCountryDetails(fromId);
+            else if (fromPage === 'city'      && fromId) displayCityDetails(fromId);
+            else if (fromPage === 'continent' && fromId) displayContinentDetails(fromId);
+            else if (fromPage === 'species'   && fromId) displaySpeciesDetails(fromId);
+            else displayCharacterList();
+        });
     }
 }
 
@@ -3899,6 +3921,136 @@ async function displayWorldMap() {
 }
 
 // =================================================================================
+// 13b. Continent Details
+// =================================================================================
+
+async function displayContinentDetails(continentId, fromPage, fromId) {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading...</h2>`;
+
+    try {
+        // ── Fetch continent doc and all countries belonging to it ────────────
+        const [continentDoc, countriesSnap] = await Promise.all([
+            db.collection('continents').doc(continentId).get(),
+            db.collection('countries').where('cont_id', '==', continentId).get(),
+        ]);
+
+        if (!continentDoc.exists) {
+            el.innerHTML = `
+                <button class="back-button" id="back-btn">← Back to Map</button>
+                <h2>Continent not found.</h2>
+            `;
+            document.getElementById('back-btn').addEventListener('click', displayWorldMap);
+            return;
+        }
+
+        const data = continentDoc.data();
+
+        // ── Collect countries, sorted alphabetically ─────────────────────────
+        const countries = [];
+        countriesSnap.forEach(d => {
+            const c = { id: d.id, ...d.data() };
+            if (c.ctry_name) countries.push(c);
+        });
+        countries.sort((a, b) => (a.ctry_name || '').localeCompare(b.ctry_name || ''));
+
+        // ── Back button logic ────────────────────────────────────────────────
+        const backLabel = fromPage === 'character' ? '← Back to Character'
+                        : fromPage === 'country'   ? '← Back to Country'
+                        : fromPage === 'city'      ? '← Back to City'
+                        : '← Back to Map';
+        function handleBack() {
+            if      (fromPage === 'character' && fromId) displayCharacterDetails(fromId);
+            else if (fromPage === 'country'   && fromId) displayCountryDetails(fromId);
+            else if (fromPage === 'city'      && fromId) displayCityDetails(fromId);
+            else displayWorldMap();
+        }
+
+        // ── Escape helper ────────────────────────────────────────────────────
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Render shell ─────────────────────────────────────────────────────
+        el.innerHTML = `
+            <button class="back-button" id="back-btn">${escHtml(backLabel)}</button>
+            <h1 class="character-detail-name">${escHtml(data.cont_name || continentId)}</h1>
+            <div class="character-detail-content">
+                <div class="character-detail-left" id="continent-left"></div>
+                <div class="character-detail-description" id="continent-right"></div>
+            </div>
+        `;
+        document.getElementById('back-btn').addEventListener('click', handleBack);
+
+        const leftCol  = document.getElementById('continent-left');
+        const rightCol = document.getElementById('continent-right');
+
+        // ── Continent map image (if available) ───────────────────────────────
+        if (data.map_path) {
+            const mapURL = await getStorageURL(data.map_path);
+            if (mapURL) {
+                const mapImg = document.createElement('img');
+                mapImg.src = mapURL;
+                mapImg.alt = `Map of ${data.cont_name}`;
+                mapImg.classList.add('character-portrait-detail');
+                leftCol.appendChild(mapImg);
+            }
+        }
+
+        // ── Info box ─────────────────────────────────────────────────────────
+        const infoRows = [];
+        if (countries.length) {
+            const countryItems = countries.map(c => {
+                const name = escHtml(c.ctry_name);
+                return `<a href="#" class="info-country-link" data-country-id="${c.id}">${name}</a>`;
+            });
+            infoRows.push({ label: 'Countries', html: countryItems.join(', ') });
+        }
+
+        if (infoRows.length) {
+            const infoBox = document.createElement('div');
+            infoBox.classList.add('character-info-box');
+            infoBox.innerHTML = `
+                <div class="character-info-box-header">Details</div>
+                <dl class="character-info-list">
+                    ${infoRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            leftCol.appendChild(infoBox);
+
+            // ── Wire country links ───────────────────────────────────────────
+            infoBox.querySelectorAll('.info-country-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    displayCountryDetails(link.dataset.countryId, 'continent', continentId);
+                });
+            });
+        }
+
+        // ── Description ──────────────────────────────────────────────────────
+        if (data.cont_desc) {
+            rightCol.insertAdjacentHTML('afterbegin', parseDescriptionLinks(data.cont_desc));
+            wireDescriptionLinks(rightCol, 'continent', continentId);
+        }
+
+    } catch (error) {
+        console.error('Error loading continent details:', error);
+        el.innerHTML = `
+            <button class="back-button" id="back-btn">← Back to Map</button>
+            <h2>Error loading continent details. Please try again.</h2>
+        `;
+        document.getElementById('back-btn').addEventListener('click', displayWorldMap);
+    }
+}
+
+
+// =================================================================================
 // 14. Country Details
 // =================================================================================
 
@@ -4292,13 +4444,17 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
     el.innerHTML = `<h2>Loading...</h2>`;
 
     function goBack() {
-        if (fromPage === 'character' && fromId) {
-            displayCharacterDetails(fromId);
-        } else {
-            displaySpeciesList();
-        }
+        if      (fromPage === 'character' && fromId) displayCharacterDetails(fromId);
+        else if (fromPage === 'country'   && fromId) displayCountryDetails(fromId);
+        else if (fromPage === 'city'      && fromId) displayCityDetails(fromId);
+        else if (fromPage === 'continent' && fromId) displayContinentDetails(fromId);
+        else displaySpeciesList();
     }
-    const backLabel = fromPage === 'character' ? '← Back to Character' : '← Back to Species';
+    const backLabel = fromPage === 'character' ? '← Back to Character'
+                    : fromPage === 'country'   ? '← Back to Country'
+                    : fromPage === 'city'      ? '← Back to City'
+                    : fromPage === 'continent' ? '← Back to Continent'
+                    : '← Back to Species';
 
     try {
         const [speciesDoc, subspeciesSnap, worldsSnap] = await Promise.all([
@@ -4574,6 +4730,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderFooter();
+
+    // ── Scroll-to-top button ─────────────────────────────────────────────────
+    const scrollBtn = document.createElement('button');
+    scrollBtn.className = 'scroll-top-btn';
+    scrollBtn.setAttribute('aria-label', 'Scroll to top');
+    scrollBtn.innerHTML = '↑';
+    document.body.appendChild(scrollBtn);
+    window.addEventListener('scroll', () => {
+        scrollBtn.classList.toggle('visible', window.scrollY > 300);
+    }, { passive: true });
+    scrollBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
     displayHomeScreen();
 });
 // =================================================================================

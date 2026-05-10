@@ -2,7 +2,7 @@
 // Airdaeium Service Worker
 // =================================================================================
 
-const CACHE_NAME = 'airdaeium-v4';
+const CACHE_NAME = 'airdaeium-v5';
 
 // Core app shell files to cache on install
 const PRECACHE_URLS = [
