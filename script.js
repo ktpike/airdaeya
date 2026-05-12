@@ -460,6 +460,20 @@ async function displayCharacterList() {
         `;
         document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
 
+    // Skip year 0 when using arrow keys — jump from 1 to -1 and back
+    document.getElementById('mt-year').addEventListener('input', function() {
+        if (parseInt(this.value) === 0) {
+            const wasDecrementing = this._lastYear > 0;
+            this.value = wasDecrementing ? -1 : 1;
+        }
+        this._lastYear = parseInt(this.value) || 1;
+        const errEl = document.getElementById('mt-year-error');
+        if (errEl) errEl.style.display = 'none';
+    });
+    document.getElementById('mt-year').addEventListener('keydown', function(e) {
+        this._lastYear = parseInt(this.value) || 1;
+    });
+
         // ── Tab switching ──────────────────────────────────────────────────
         document.getElementById('tab-profiles').addEventListener('click', () => {
             characterListTab = 'profiles';
@@ -4769,9 +4783,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Orbital constants ─────────────────────────────────────────────────────────────
 const MOON_TRACKER = {
     // Moon periods in Oram days
-    KUU:  { name: 'Kuu',  period: 14.0000000012,    color: '#e8eeff', radius: 9 },  // silvery-white Love Goddess
-    ISA:  { name: 'Isa',  period: 43.613852953,     color: '#40c8a0', radius: 6 },  // teal (green↔blue Trickster)
-    UMAN: { name: 'Uman', period: 64.9515419873522, color: '#d94040', radius: 5 },  // red God of War
+    KUU:  { name: 'Kuu',  period: 14.0000000012,     color: '#e8eeff', radius: 9 },  // silvery-white Love Goddess
+    ISA:  { name: 'Isa',  period: 43.613852953,      color: '#40c8a0', radius: 6 },  // exact period from author's spreadsheet
+    UMAN: { name: 'Uman', period: 64.9515419873522,  color: '#d94040', radius: 5 },  // exact period from author's spreadsheet
+    // Epoch: Mamdi 1, Year 1 AWB at midnight = fractionalDay 0, all moons at phase 0.
+    // DarkestNight (Anany 33, 1 BWB) was the preceding evening — moons reaching new by midnight.
+    // No phaseOffset needed; the exact orbital periods place all holidays correctly.
 
     // Hours per Oram day
     HOURS_PER_DAY: 28,
@@ -4794,31 +4811,33 @@ const MOON_TRACKER = {
 
 /** Convert a calendar date + time to absolute fractional day since epoch.
  *  Calendar year 1, TQ 1, Day 1 = absolute day 1 (epoch = day 0).
- *  @param {number} year  - AWB year (1+)
+ *  There is no year 0: year -1 (1 BWB) immediately precedes year 1 (1 AWB).
+ *  @param {number} year  - AWB year (1+) or BWB year as negative (-1 = 1 BWB, -2 = 2 BWB, …)
  *  @param {number} tq    - tritquarter (1-12)
  *  @param {number} day   - day within TQ (1-33)
  *  @param {number} hour  - Oram hour (0-27, where 28:00 = midnight = 0 of next day)
  */
 function calendarToFractionalDay(year, tq, day, hour) {
-    const dayOfYear = (tq - 1) * 33 + day;       // 1-396
-    const absDay    = (year - 1) * 396 + dayOfYear; // integer calendar day
-    const fraction  = hour / 28;                  // fraction through the day
-    return absDay - 1 + fraction;                 // 0-based fractional day from epoch
+    const effYear   = year < 0 ? year + 1 : year;  // skip year 0: -1 BWB→eff 0, -2 BWB→eff -1
+    const dayOfYear = (tq - 1) * 33 + day;
+    const absDay    = (effYear - 1) * 396 + dayOfYear;
+    const fraction  = hour / 28;
+    return absDay - 1 + fraction;
 }
 
-/** Moon phase: 0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter */
-function moonPhase(fractionalDay, period) {
-    // Using (day / period) % 1 — confirmed against calibration data
-    return ((fractionalDay + 1) / period) % 1;
-    // +1 because the formula uses (absoluteCalendarDay / period), and
-    // fractionalDay = absCalDay - 1 + hourFraction, but for the epoch
-    // calibration the integer formula was (day / period) % 1 where day = absCalDay.
-    // So we add back the 1 to match.
+/** Moon phase: 0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter
+ *  Epoch: Mamdi 1, Year 1 AWB midnight (fractionalDay 0) — all moons at phase 0.
+ *  No phaseOffset needed; the exact orbital periods handle all calibration.
+ */
+function moonPhase(fractionalDay, period, phaseOffset = 0) {
+    return ((fractionalDay + phaseOffset) / period) % 1;
 }
 
 /** Phase distance from new moon, in days */
 function distFromNew(phase, period) {
-    return Math.min(phase, 1 - phase) * period;
+    // Days until the NEXT new moon (phase=0/1).
+    // (1 - phase) * period gives forward distance to next new for any phase.
+    return (1 - phase) * period;
 }
 
 /** Phase distance from full moon, in days */
@@ -4896,17 +4915,19 @@ function skyPosition(lon, phase) {
     return { visible: false, desc: 'below horizon', night: false };
 }
 
-/** Phase name string */
+/** Phase name string — boundaries match author's spreadsheet lookup table */
 function phaseName(phase) {
-    const p = phase;
-    if (p < 0.04 || p > 0.96)         return 'New Moon 🌑';
-    if (p < 0.21)                      return 'Waxing Crescent 🌒';
-    if (p < 0.29)                      return 'First Quarter 🌓';
-    if (p < 0.46)                      return 'Waxing Gibbous 🌔';
-    if (p < 0.54)                      return 'Full Moon 🌕';
-    if (p < 0.71)                      return 'Waning Gibbous 🌖';
-    if (p < 0.79)                      return 'Last Quarter 🌗';
-    return                               'Waning Crescent 🌘';
+    const p = phase < 0 ? phase + 1 : phase;
+    if (p < 0.0151 || p >= 0.991)  return 'New Moon 🌑';
+    if (p < 0.03)                   return 'Waxing Sickle 🌒';
+    if (p < 0.2415)                 return 'Waxing Crescent 🌒';
+    if (p < 0.2585)                 return 'First Quarter 🌓';
+    if (p < 0.491)                  return 'Waxing Gibbous 🌔';
+    if (p < 0.515)                  return 'Full Moon 🌕';
+    if (p < 0.74)                   return 'Waning Gibbous 🌖';
+    if (p < 0.761)                  return 'Last Quarter 🌗';
+    if (p < 0.9715)                 return 'Waning Crescent 🌘';
+    return                           'Waning Sickle 🌘';
 }
 
 /** Moon SVG disc with correct phase shading */
@@ -5155,11 +5176,14 @@ function renderSkyDiagram(moons, hour = 0) {
  * Given the array of computed moon objects (keyed by moon.moon: 'Kuu', 'Isa', 'Uman'),
  * returns { name, icon, description } for the active lunar holiday, or null if none.
  *
- * Phase helpers use illumination % (0–100) and phase (0–1):
- *   isNew    : illum < 1%   (phase ≈ 0 or 1, very close to dark)
- *   isFull   : illum >= 99%
- *   isQuarter: illum >= 49% && illum <= 51% (first or last quarter)
- *   isSickle : illum >= 1.5% && illum < 3%
+ * Phase thresholds match author's spreadsheet lookup table (symmetric — no direction needed):
+ *   isNew    : phase < 0.0151 or >= 0.991
+ *   isFull   : phase >= 0.491 and < 0.515
+ *   isQuarter: illumination 49–51%
+ *   isSickle : phase 0.0151–0.03 or 0.9715–0.991
+ *
+ * If the holiday is not active at the selected hour, the full calendar day is scanned
+ * and the banner shows with the hour at which the holiday begins.
  *
  * Rules are checked in the order listed. First match wins.
  */
@@ -5254,17 +5278,21 @@ const HOLIDAY_RULES = [
     },
 ];
 
-// Shared phase helpers — used by both detectLunarHoliday and findNextHoliday
+// Phase helpers for HOLIDAY_RULES — match author's spreadsheet lookup table.
+//   isNew    : phase < 0.0151 or >= 0.991
+//   isFull   : phase >= 0.491 and < 0.515
+//   isQuarter: illumination 49–51%
+//   isSickle : phase 0.0151–0.03 or 0.9715–0.991
 function _holidayHelpers(illumFn) {
     return {
-        isNew:     m => illumFn(m) <  1,
-        isFull:    m => illumFn(m) >= 99,
+        isNew:     m => m.phase < 0.0151 || m.phase >= 0.991,
+        isFull:    m => m.phase >= 0.491 && m.phase < 0.515,
         isQuarter: m => illumFn(m) >= 49 && illumFn(m) <= 51,
-        isSickle:  m => illumFn(m) >= 1.5 && illumFn(m) < 3,
+        isSickle:  m => (m.phase >= 0.0151 && m.phase < 0.03) || (m.phase >= 0.9715 && m.phase < 0.991),
     };
 }
 
-function detectLunarHoliday(moonsData) {
+function detectLunarHoliday(moonsData, fractDay) {
     const byName = {};
     for (const m of moonsData) byName[m.moon] = m;
     const kuu  = byName['Kuu'];
@@ -5272,49 +5300,122 @@ function detectLunarHoliday(moonsData) {
     const uman = byName['Uman'];
     if (!kuu || !isa || !uman) return null;
 
-    const h = _holidayHelpers(m => m.illum * 100);
-    const moonEntry = m => ({ phase: m.phase, color: m.color });
+    const makeState = (k, i, u) => ({
+        phK: k.phase, phI: i.phase, phU: u.phase,
+        ilI: i.illum * 100, ilU: u.illum * 100,
+    });
 
-    for (const rule of HOLIDAY_RULES) {
-        if (rule.test(kuu, isa, uman, h)) {
-            return {
-                name: rule.name,
-                moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)],
-                description: rule.description
-            };
-        }
+    // Check current moment first
+    const currentName = _dfnHolidayTest(makeState(kuu, isa, uman));
+    if (currentName) {
+        const rule = HOLIDAY_RULES.find(r => r.name === currentName);
+        const moonEntry = m => ({ phase: m.phase, color: m.color });
+        return {
+            name: currentName,
+            moons: [moonEntry(kuu), moonEntry(isa), moonEntry(uman)],
+            description: rule ? rule.description : '',
+            allDay: false,
+        };
     }
-    return null;
+
+    // If not active right now, scan the full calendar day (hour 0–27)
+    if (fractDay === undefined) return null;
+    const dayStart = Math.floor(fractDay);
+    const KUU  = MOON_TRACKER.KUU;
+    const ISA  = MOON_TRACKER.ISA;
+    const UMAN = MOON_TRACKER.UMAN;
+    let foundName = null, foundHour = -1;
+    for (let h = 0; h <= 27; h++) {
+        const t = dayStart - 1 + h / 28;
+        let phK = (t / KUU.period)  % 1; if (phK < 0) phK += 1;
+        let phI = (t / ISA.period)  % 1; if (phI < 0) phI += 1;
+        let phU = (t / UMAN.period) % 1; if (phU < 0) phU += 1;
+        const name = _dfnHolidayTest({ phK, phI, phU, ilI: illumination(phI)*100, ilU: illumination(phU)*100 });
+        if (name) { foundName = name; foundHour = h; break; }
+    }
+    if (!foundName) return null;
+
+    const t2 = dayStart - 1 + foundHour / 28;
+    let phK2 = (t2 / KUU.period)  % 1; if (phK2 < 0) phK2 += 1;
+    let phI2 = (t2 / ISA.period)  % 1; if (phI2 < 0) phI2 += 1;
+    let phU2 = (t2 / UMAN.period) % 1; if (phU2 < 0) phU2 += 1;
+    const rule = HOLIDAY_RULES.find(r => r.name === foundName);
+    return {
+        name: foundName,
+        moons: [
+            { phase: phK2, color: KUU.color },
+            { phase: phI2, color: ISA.color },
+            { phase: phU2, color: UMAN.color },
+        ],
+        description: rule ? rule.description : '',
+        allDay: true,
+        activeHour: foundHour,
+    };
 }
 
 // Find the next occurrence of a named holiday after fractDay.
 // Returns { absDay, calendar } or null.
+// ── Shared holiday helper: builds per-moon phase objects for a given fractional time ──
+// Epoch: Mamdi 1, Year 1 AWB midnight (fractionalDay = 0) — all moons at phase 0.
+function _moonStateAtEvening(t) {
+    const KUU  = MOON_TRACKER.KUU;
+    const ISA  = MOON_TRACKER.ISA;
+    const UMAN = MOON_TRACKER.UMAN;
+    let phK = (t / KUU.period)  % 1; if (phK < 0) phK += 1;
+    let phI = (t / ISA.period)  % 1; if (phI < 0) phI += 1;
+    let phU = (t / UMAN.period) % 1; if (phU < 0) phU += 1;
+    return {
+        phK, phI, phU,
+        ilK: illumination(phK) * 100,
+        ilI: illumination(phI) * 100,
+        ilU: illumination(phU) * 100,
+    };
+}
+
+// Holiday detection using the author's spreadsheet phase lookup table.
+// Phase thresholds (symmetric — waxing and waning share the same illumination at equal distance):
+//   New:     phase < 0.0151  OR  phase >= 0.991
+//   Sickle:  phase 0.0151–0.03  OR  phase 0.9715–0.991
+//   Full:    phase 0.491–0.515
+//   Mid:     everything else
+// Darknight: all three moons New simultaneously.
+function _dfnHolidayTest(s) {
+    const { phK, phI, phU, ilI, ilU } = s;
+
+    const isNew    = p => p < 0.0151 || p >= 0.991;
+    const isSickle = p => (p >= 0.0151 && p < 0.03) || (p >= 0.9715 && p < 0.991);
+    const isFull   = p => p >= 0.491 && p < 0.515;
+    const isMid    = p => !isNew(p) && !isFull(p);
+
+    const kNew  = isNew(phK);
+    const kFull = isFull(phK);
+    const kMid  = isMid(phK);
+
+    if (kNew  && isNew(phI) && isNew(phU))                          return "Darknight";
+    if (kFull && isNew(phI) && isNew(phU))                          return "Magic Moon";
+    if (isSickle(phI) && isSickle(phU) && kMid)                    return "Assassin's Night";
+    if (kFull && isFull(phU) && isNew(phI))                         return "Lovers' Night";
+    if (kFull && isFull(phI) && isNew(phU))                         return "Hunters' Night";
+    if (isFull(phI) && isFull(phU) && kNew)                         return "Demons' Night";
+    if (isFull(phI) && isFull(phU) && !kNew)                        return "Spirits' Night";
+    if (isFull(phI) && kNew && isNew(phU))                          return "Tricksters' Moon";
+    if (isFull(phU) && kNew && isNew(phI))                          return "Warriors' Moon";
+    if (kFull && isFull(phU) && isMid(phI))                         return "Widows' Night";
+    if (kFull && isFull(phI) && isMid(phU))                         return "Newborns' Night";
+    if (kNew  && ilI >= 49 && ilI <= 51 && ilU >= 49 && ilU <= 51)  return "Half Night";
+    if (kNew  && isNew(phU) && isMid(phI))                          return "Farmers' Night";
+    if (kNew  && isNew(phI) && isMid(phU))                          return "Widowers' Moon";
+    if (isNew(phI) && isNew(phU) && !kNew && !kFull)                return "Wishing Moon";
+    return null;
+}
+
 function findNextHoliday(fractDay, holidayName) {
-    const rule = HOLIDAY_RULES.find(r => r.name === holidayName);
-    if (!rule) return null;
-
-    const KUU  = MOON_TRACKER.KUU.period;
-    const ISA  = MOON_TRACKER.ISA.period;
-    const UMAN = MOON_TRACKER.UMAN.period;
-
-    // Build phase helpers that work on raw illumination values (0–100 scale)
-    const h = _holidayHelpers(x => x);
-
+    const EVENING = (27 + 59/60) / 28;
     for (let d = Math.ceil(fractDay) + 1; d < fractDay + 20000; d++) {
-        const phK = ((d + 1) / KUU)  % 1;
-        const phI = ((d + 1) / ISA)  % 1;
-        const phU = ((d + 1) / UMAN) % 1;
-
-        const ilK = illumination(phK) * 100;
-        const ilI = illumination(phI) * 100;
-        const ilU = illumination(phU) * 100;
-
-        // Wrap as plain objects with illum100 as the value passed to helpers
-        const kuu  = ilK;
-        const isa  = ilI;
-        const uman = ilU;
-
-        if (rule.test(kuu, isa, uman, h)) {
+        const t = d - 1 + EVENING;
+        const s = _moonStateAtEvening(t);
+        const found = _dfnHolidayTest(s);
+        if (found === holidayName) {
             return { absDay: d, calendar: absDateToCalendar(d) };
         }
     }
@@ -5322,40 +5423,53 @@ function findNextHoliday(fractDay, holidayName) {
 }
 
 function findNextEvent(fractDay, type) {
-    // type: 'darknight' | 'brightnight'
-    const KUU  = MOON_TRACKER.KUU.period;
-    const ISA  = MOON_TRACKER.ISA.period;
-    const UMAN = MOON_TRACKER.UMAN.period;
-    const tol  = 1.0;
+    const EVENING = (27 + 59/60) / 28;
+    const KUU  = MOON_TRACKER.KUU;
+    const ISA  = MOON_TRACKER.ISA;
+    const UMAN = MOON_TRACKER.UMAN;
 
     for (let d = Math.ceil(fractDay) + 1; d < fractDay + 20000; d++) {
-        const phK = ((d + 1) / KUU)  % 1;
-        const phI = ((d + 1) / ISA)  % 1;
-        const phU = ((d + 1) / UMAN) % 1;
-
-        const dK = Math.min(phK, 1 - phK) * KUU;
-        const dI = Math.min(phI, 1 - phI) * ISA;
-        const dU = Math.min(phU, 1 - phU) * UMAN;
+        const t  = d - 1 + EVENING;
+        const s  = _moonStateAtEvening(t);
 
         if (type === 'darknight') {
-            if (dK <= tol && dI <= tol && dU <= tol) return d;
+            // All three moons New simultaneously (phase < 0.0151 or >= 0.991)
+            const _isNew = p => p < 0.0151 || p >= 0.991;
+            if (_isNew(s.phK) && _isNew(s.phI) && _isNew(s.phU)) return d;
         } else {
-            const fK = Math.abs(phK - 0.5) * KUU;
-            const fI = Math.abs(phI - 0.5) * ISA;
-            const fU = Math.abs(phU - 0.5) * UMAN;
-            if (fK <= tol && fI <= tol && fU <= tol) return d;
+            // brightnight: all three close to full — use 1.5d tolerance
+            const dFullK = Math.abs(s.phK - 0.5) * KUU.period;
+            const dFullI = Math.abs(s.phI - 0.5) * ISA.period;
+            const dFullU = Math.abs(s.phU - 0.5) * UMAN.period;
+            if (dFullK <= 1.5 && dFullI <= 1.5 && dFullU <= 1.5) return d;
         }
     }
     return null;
 }
 
+/** Format a year for display — positive = AWB, negative = BWB (no year 0). */
+function yearLabel(year) {
+    return year < 0 ? `${-year} BWB` : `${year} AWB`;
+}
+
 function absDateToCalendar(absDay) {
     const d = Math.floor(absDay);
-    const year = Math.floor((d - 1) / 396) + 1;
-    const doy  = ((d - 1) % 396) + 1;
-    const tq   = Math.floor((doy - 1) / 33) + 1;
-    const day  = ((doy - 1) % 33) + 1;
-    return { year, tq, day, tqName: MOON_TRACKER.TQ_NAMES[tq] || `TQ${tq}` };
+    // No year 0: d >= 1 = AWB, d <= 0 = BWB.
+    if (d >= 1) {
+        const year  = Math.floor((d - 1) / 396) + 1;
+        const doy   = ((d - 1) % 396) + 1;
+        const tq    = Math.floor((doy - 1) / 33) + 1;
+        const day   = ((doy - 1) % 33) + 1;
+        return { year, tq, day, tqName: MOON_TRACKER.TQ_NAMES[tq] || `TQ${tq}` };
+    } else {
+        const neg     = -d;
+        const bwbYear = Math.floor(neg / 396) + 1;
+        const doyRev  = neg % 396;
+        const doy     = doyRev === 0 ? 396 : (396 - doyRev);
+        const tq      = Math.floor((doy - 1) / 33) + 1;
+        const day     = ((doy - 1) % 33) + 1;
+        return { year: -bwbYear, tq, day, tqName: MOON_TRACKER.TQ_NAMES[tq] || `TQ${tq}` };
+    }
 }
 
 // ── Main display function ─────────────────────────────────────────────────────────
@@ -5405,8 +5519,9 @@ async function displayMoonTracker(preselectedCityId = null) {
 
                 <div class="moon-tracker-inputs">
                     <div class="moon-input-group">
-                        <label for="mt-year">Year (AWB)</label>
-                        <input type="number" id="mt-year" min="1" value="14887" class="mt-input"/>
+                        <label for="mt-year">Year (AWB / neg = BWB)</label>
+                        <input type="number" id="mt-year" value="14887" class="mt-input"/>
+                        <span id="mt-year-error" style="display:none;color:#e07070;font-size:0.8em;margin-top:2px;display:none;"></span>
                     </div>
                     <div class="moon-input-group">
                         <label for="mt-tq">Tritquarter</label>
@@ -5429,12 +5544,13 @@ async function displayMoonTracker(preselectedCityId = null) {
                         <select id="mt-hour" class="mt-input">
                             ${Array.from({length:28},(_,i)=>{
                                 const h = i.toString().padStart(2,'0');
-                                const label = i === 0 ? '00:00 — Midnight'
+                                const label = i === 0  ? '00:00 — Midnight'
                                             : i === 7  ? '07:00 — Dawn'
                                             : i === 14 ? '14:00 — Midday'
                                             : i === 21 ? '21:00 — Dusk'
+                                            : i === 27 ? '27:00 — Late Evening'
                                             : `${h}:00`;
-                                return `<option value="${i}">${label}</option>`;
+                                return `<option value="${i}"${i === 27 ? ' selected' : ''}>${label}</option>`;
                             }).join('')}
                         </select>
                     </div>
@@ -5456,7 +5572,15 @@ async function displayMoonTracker(preselectedCityId = null) {
     document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
 
     document.getElementById('mt-calculate-btn').addEventListener('click', () => {
-        const year = parseInt(document.getElementById('mt-year').value)   || 1;
+        const _yearRaw = parseInt(document.getElementById('mt-year').value);
+        if (_yearRaw === 0 || isNaN(_yearRaw)) {
+            const errEl = document.getElementById('mt-year-error');
+            if (errEl) { errEl.textContent = 'Year 0 does not exist. Use 1 AWB or -1 (1 BWB).'; errEl.style.display = 'block'; }
+            return;
+        }
+        const year = _yearRaw;
+        const errEl = document.getElementById('mt-year-error');
+        if (errEl) errEl.style.display = 'none';
         const tq   = parseInt(document.getElementById('mt-tq').value)     || 1;
         const day  = parseInt(document.getElementById('mt-day').value)    || 1;
         const hour = parseInt(document.getElementById('mt-hour').value);
@@ -5493,7 +5617,7 @@ async function displayMoonTracker(preselectedCityId = null) {
 
         // Compute moon data using effectiveHour for sky positions
         const moonsData = Object.values(MOON_TRACKER).filter(m => m.period).map(m => {
-            const phase = moonPhase(fractDay, m.period);
+            const phase = moonPhase(fractDay, m.period, m.phaseOffset || 0);
             const lon   = moonLongitude(phase, effectiveHour);
             const sky   = skyPosition(lon, phase);
             const illum = illumination(phase);
@@ -5571,17 +5695,21 @@ async function displayMoonTracker(preselectedCityId = null) {
             </div>`;
         }).join('');
 
-        // Lunar holiday detection
-        const holiday = detectLunarHoliday(moonsData);
+        // Lunar holiday detection — checks current moment, then scans full day
+        const holiday = detectLunarHoliday(moonsData, fractDay);
         const holidayEl = document.getElementById('mt-holiday');
         if (holiday) {
             const moonIcons = holiday.moons
                 .map(m => `<span class="moon-holiday-icon">${moonSVG(m.phase, m.color, 28)}</span>`)
                 .join('');
+            const hourNote = holiday.allDay
+                ? `<div class="moon-holiday-hour">Begins at hour ${holiday.activeHour}:00 today</div>`
+                : '';
             holidayEl.innerHTML = `
             <div class="moon-holiday converter-panel">
                 <div class="moon-holiday-header"><span class="moon-holiday-icons">${moonIcons}</span> ${holiday.name}</div>
                 <div class="moon-holiday-body">${holiday.description}</div>
+                ${hourNote}
             </div>`;
             holidayEl.style.display = 'block';
         } else {
@@ -5605,7 +5733,7 @@ async function displayMoonTracker(preselectedCityId = null) {
                 <div class="moon-event moon-event--dark">
                     <div class="moon-event-icon">🌑🌑🌑</div>
                     <div class="moon-event-label">Next Darknight</div>
-                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${c.year} AWB</div>
+                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${yearLabel(c.year)}</div>
                     <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
                 </div>`;
             } else {
@@ -5613,7 +5741,7 @@ async function displayMoonTracker(preselectedCityId = null) {
                 <div class="moon-event moon-event--bright">
                     <div class="moon-event-icon">🌕🌕🌕</div>
                     <div class="moon-event-label">Next Brightnight</div>
-                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${c.year} AWB</div>
+                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${yearLabel(c.year)}</div>
                     <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
                 </div>`;
             }
@@ -5644,7 +5772,7 @@ async function displayMoonTracker(preselectedCityId = null) {
                 eventsHtml += `
                 <div class="moon-event moon-event--holiday">
                     <div class="moon-event-label">${name}</div>
-                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${c.year} AWB</div>
+                    <div class="moon-event-date">${c.tqName} ${c.day}, Year ${yearLabel(c.year)}</div>
                     <div class="moon-event-away">${daysAway} day${daysAway !== 1 ? 's' : ''} away</div>
                 </div>`;
             } else {
