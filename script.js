@@ -185,12 +185,7 @@ function wireDescriptionLinks(containerEl, contextPage, contextId) {
             else if (type === 'continent') displayContinentDetails(id, contextPage, contextId);
             else if (type === 'species')   displaySpeciesDetails(id, contextPage, contextId);
             else if (type === 'subspecies') {
-                // Resolve the parent species_id from the subspecies doc, then navigate
-                db.collection('subspecies').doc(id).get().then(ssDoc => {
-                    if (ssDoc.exists && ssDoc.data().species_id) {
-                        displaySpeciesDetails(ssDoc.data().species_id, contextPage, contextId);
-                    }
-                });
+                displaySubspeciesDetails(id, contextPage, contextId);
             }
         });
     });
@@ -459,20 +454,6 @@ async function displayCharacterList() {
             <div id="char-list-view"></div>
         `;
         document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
-
-    // Skip year 0 when using arrow keys — jump from 1 to -1 and back
-    document.getElementById('mt-year').addEventListener('input', function() {
-        if (parseInt(this.value) === 0) {
-            const wasDecrementing = this._lastYear > 0;
-            this.value = wasDecrementing ? -1 : 1;
-        }
-        this._lastYear = parseInt(this.value) || 1;
-        const errEl = document.getElementById('mt-year-error');
-        if (errEl) errEl.style.display = 'none';
-    });
-    document.getElementById('mt-year').addEventListener('keydown', function(e) {
-        this._lastYear = parseInt(this.value) || 1;
-    });
 
         // ── Tab switching ──────────────────────────────────────────────────
         document.getElementById('tab-profiles').addEventListener('click', () => {
@@ -4458,16 +4439,18 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
     el.innerHTML = `<h2>Loading...</h2>`;
 
     function goBack() {
-        if      (fromPage === 'character' && fromId) displayCharacterDetails(fromId);
-        else if (fromPage === 'country'   && fromId) displayCountryDetails(fromId);
-        else if (fromPage === 'city'      && fromId) displayCityDetails(fromId);
-        else if (fromPage === 'continent' && fromId) displayContinentDetails(fromId);
+        if      (fromPage === 'character'  && fromId) displayCharacterDetails(fromId);
+        else if (fromPage === 'country'    && fromId) displayCountryDetails(fromId);
+        else if (fromPage === 'city'       && fromId) displayCityDetails(fromId);
+        else if (fromPage === 'continent'  && fromId) displayContinentDetails(fromId);
+        else if (fromPage === 'subspecies' && fromId) displaySubspeciesDetails(fromId);
         else displaySpeciesList();
     }
-    const backLabel = fromPage === 'character' ? '← Back to Character'
-                    : fromPage === 'country'   ? '← Back to Country'
-                    : fromPage === 'city'      ? '← Back to City'
-                    : fromPage === 'continent' ? '← Back to Continent'
+    const backLabel = fromPage === 'character'  ? '← Back to Character'
+                    : fromPage === 'country'    ? '← Back to Country'
+                    : fromPage === 'city'       ? '← Back to City'
+                    : fromPage === 'continent'  ? '← Back to Continent'
+                    : fromPage === 'subspecies' ? '← Back to Subspecies'
                     : '← Back to Species';
 
     try {
@@ -4577,7 +4560,12 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
             const ssGrid = document.getElementById('ss-grid');
             subspeciesList.forEach(ss => {
                 const card = document.createElement('div');
-                card.classList.add('species-subspecies-card', 'species-subspecies-card--wide');
+                card.classList.add('species-subspecies-card', 'species-subspecies-card--wide', 'species-subspecies-card--clickable');
+                card.setAttribute('role', 'button');
+                card.setAttribute('tabindex', '0');
+                card.title = `View ${ss.ss_name || ss.id} details`;
+                card.addEventListener('click', () => displaySubspeciesDetails(ss.id, 'species', speciesId));
+                card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') displaySubspeciesDetails(ss.id, 'species', speciesId); });
 
                 // Image element (async load, form-based placeholder while waiting)
                 const img = document.createElement('img');
@@ -4601,11 +4589,20 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
                 imgWrap.classList.add('species-subspecies-card-img-wrap');
                 imgWrap.appendChild(img);
 
+                // Strip HTML for plain-text preview (no raw HTML in card body)
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = ss.ss_desc ? parseDescriptionLinks(ss.ss_desc) : '';
+                const plainText = tempDiv.textContent || '';
+                const previewText = plainText.length > 180
+                    ? plainText.slice(0, 180).replace(/\s+\S*$/, '') + '\u2026'
+                    : plainText;
+
                 const contentWrap = document.createElement('div');
                 contentWrap.classList.add('species-subspecies-card-content');
                 contentWrap.innerHTML = `
                     <div class="species-subspecies-card-header">${escHtml(ss.ss_name || ss.id)}</div>
-                    <div class="species-subspecies-card-body">${ss.ss_desc ? ss.ss_desc : ''}</div>
+                    <div class="species-subspecies-card-body">${escHtml(previewText)}</div>
+                    ${plainText.length > 180 ? '<div class="species-subspecies-card-more">Read more \u2192</div>' : ''}
                 `;
 
                 card.appendChild(imgWrap);
@@ -4618,6 +4615,134 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
         console.error('Error loading species details:', err);
         el.innerHTML = `<button class="back-button" id="sp-back-btn">${backLabel}</button><h2>Error loading species. Please try again.</h2>`;
         document.getElementById('sp-back-btn').addEventListener('click', goBack);
+    }
+}
+
+// =================================================================================
+// 17b. Subspecies Detail Page
+// =================================================================================
+
+async function displaySubspeciesDetails(subspeciesId, fromPage, fromId) {
+    const el = getContainer();
+    if (!el) return;
+    el.innerHTML = `<h2>Loading...</h2>`;
+
+    function goBack() {
+        if      (fromPage === 'species'    && fromId) displaySpeciesDetails(fromId);
+        else if (fromPage === 'character'  && fromId) displayCharacterDetails(fromId);
+        else if (fromPage === 'country'    && fromId) displayCountryDetails(fromId);
+        else if (fromPage === 'city'       && fromId) displayCityDetails(fromId);
+        else if (fromPage === 'continent'  && fromId) displayContinentDetails(fromId);
+        else displaySpeciesList();
+    }
+
+    const backLabel = fromPage === 'species'   ? '\u2190 Back to Species'
+                    : fromPage === 'character' ? '\u2190 Back to Character'
+                    : fromPage === 'country'   ? '\u2190 Back to Country'
+                    : fromPage === 'city'      ? '\u2190 Back to City'
+                    : fromPage === 'continent' ? '\u2190 Back to Continent'
+                    : '\u2190 Back to Species';
+
+    try {
+        const ssDoc = await db.collection('subspecies').doc(subspeciesId).get();
+
+        if (!ssDoc.exists) {
+            el.innerHTML = `<button class="back-button" id="ss-back-btn">${backLabel}</button><h2>Subspecies not found.</h2>`;
+            document.getElementById('ss-back-btn').addEventListener('click', goBack);
+            return;
+        }
+
+        const ss = { id: ssDoc.id, ...ssDoc.data() };
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // Fetch parent species for the details box
+        let parentSpecies = null;
+        if (ss.species_id) {
+            const spDoc = await db.collection('species').doc(ss.species_id).get();
+            if (spDoc.exists) parentSpecies = { id: spDoc.id, ...spDoc.data() };
+        }
+
+        // Determine placeholder based on parent species form
+        const sForm = (parentSpecies?.s_form || '').toLowerCase();
+        const placeholderPath = sForm === 'umanid'
+            ? 'Species/placeholder_umanid.png'
+            : 'Species/placeholder_creature.png';
+
+        // ── Render shell ─────────────────────────────────────────────────────
+        el.innerHTML = `
+            <button class="back-button" id="ss-back-btn">${backLabel}</button>
+            <h1 class="character-detail-name">${escHtml(ss.ss_name || subspeciesId)}</h1>
+            <div class="character-detail-content">
+                <div class="character-detail-left" id="ss-left"></div>
+                <div class="character-detail-description" id="ss-right"></div>
+            </div>
+        `;
+        document.getElementById('ss-back-btn').addEventListener('click', goBack);
+
+        const leftCol  = document.getElementById('ss-left');
+        const rightCol = document.getElementById('ss-right');
+
+        // ── Image ─────────────────────────────────────────────────────────────
+        const img = document.createElement('img');
+        img.alt = `Image of ${ss.ss_name || subspeciesId}`;
+        img.classList.add('character-portrait-detail');
+        img.src = PLACEHOLDER_IMG_LARGE;
+        leftCol.appendChild(img);
+
+        if (ss.ss_image) {
+            getStorageURL(ss.ss_image)
+                .then(url => { if (url) img.src = url; })
+                .catch(() => getStorageURL(placeholderPath).then(ph => { if (ph) img.src = ph; }));
+        } else {
+            getStorageURL(placeholderPath).then(ph => { if (ph) img.src = ph; });
+        }
+
+        // ── Details info box ─────────────────────────────────────────────────
+        const infoRows = [];
+        if (parentSpecies) {
+            infoRows.push({
+                label: 'Species',
+                html: `<a href="#" class="info-species-link" id="ss-species-link">${escHtml(parentSpecies.s_name || ss.species_id)}</a>`
+            });
+        }
+
+        if (infoRows.length) {
+            const infoBox = document.createElement('div');
+            infoBox.classList.add('character-info-box');
+            infoBox.innerHTML = `
+                <div class="character-info-box-header">Details</div>
+                <dl class="character-info-list">
+                    ${infoRows.map(row => `
+                        <div class="character-info-row">
+                            <dt>${row.label}</dt>
+                            <dd>${row.html}</dd>
+                        </div>
+                    `).join('')}
+                </dl>
+            `;
+            leftCol.appendChild(infoBox);
+
+            if (parentSpecies) {
+                infoBox.querySelector('#ss-species-link')?.addEventListener('click', e => {
+                    e.preventDefault();
+                    displaySpeciesDetails(ss.species_id, 'subspecies', subspeciesId);
+                });
+            }
+        }
+
+        // ── Description ──────────────────────────────────────────────────────
+        if (ss.ss_desc) {
+            rightCol.insertAdjacentHTML('afterbegin', parseDescriptionLinks(ss.ss_desc));
+            wireDescriptionLinks(rightCol, 'subspecies', subspeciesId);
+        }
+
+    } catch (err) {
+        console.error('Error loading subspecies details:', err);
+        el.innerHTML = `<button class="back-button" id="ss-back-btn">${backLabel}</button><h2>Error loading subspecies. Please try again.</h2>`;
+        document.getElementById('ss-back-btn').addEventListener('click', goBack);
     }
 }
 
@@ -5570,6 +5695,20 @@ async function displayMoonTracker(preselectedCityId = null) {
     `;
 
     document.getElementById('back-to-home-btn').addEventListener('click', displayHomeScreen);
+
+    // Skip year 0 when using arrow keys — jump from 1 to -1 and back
+    document.getElementById('mt-year').addEventListener('input', function() {
+        if (parseInt(this.value) === 0) {
+            const wasDecrementing = this._lastYear > 0;
+            this.value = wasDecrementing ? -1 : 1;
+        }
+        this._lastYear = parseInt(this.value) || 1;
+        const errEl = document.getElementById('mt-year-error');
+        if (errEl) errEl.style.display = 'none';
+    });
+    document.getElementById('mt-year').addEventListener('keydown', function(e) {
+        this._lastYear = parseInt(this.value) || 1;
+    });
 
     document.getElementById('mt-calculate-btn').addEventListener('click', () => {
         const _yearRaw = parseInt(document.getElementById('mt-year').value);

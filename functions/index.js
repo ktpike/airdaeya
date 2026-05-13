@@ -32,7 +32,7 @@ const db = getFirestore();
 const ANSWER_NUMEROLOGY = {
     // Q1 — What's the most appealing form of recognition?
     "Being a respected authority with a lasting legacy.":                          [8, 1],
-    "Being known for your cunning and ability to survive.":                        [5, 1],
+    "Being known for my cunning and ability to survive.":                          [5, 1],
     "Being a pioneer who creates something new and unheard of.":                   [1, 3],
     "Being known as someone whose presence makes everything better.":              [6, 3],
     "Being recognized as the one who finally understood what no one else could.":  [11, 7],   // 11 also scores as 2
@@ -41,7 +41,7 @@ const ANSWER_NUMEROLOGY = {
     "Finding the truth about a mystery.":                                          [7, 9],
     "Healing a deep-seated pain.":                                                 [2, 6],
     "Protecting your loved ones.":                                                 [6, 2],
-    "Creating something with your hands that others will treasure.":               [4, 1],
+    "Creating something with my hands that others will treasure.":                 [4, 1],
     "Maintaining the peace and balance of my group.":                              [2, 9],
 
     // Q3 — What makes you feel most at home?
@@ -53,8 +53,8 @@ const ANSWER_NUMEROLOGY = {
 
     // Q4 — If you could instantly learn any skill, which would you choose?
     "The ability to fix and build anything.":                                      [4, 1],
-    "The power to express yourself without words.":                                [2, 3],
-    "The skill to persuade anyone to do what you want.":                           [8, 3],
+    "The power to express myself without words.":                                  [2, 3],
+    "The skill to persuade anyone to do what I want.":                             [8, 3],
     "The gift of seeing the future.":                                              [7, 9],
     "The power to understand the hidden language of living things.":               [2, 7],
 
@@ -63,6 +63,7 @@ const ANSWER_NUMEROLOGY = {
     "It's something to be avenged.":                                               [8, 1],
     "It's a mystery waiting to be uncovered.":                                     [7, 3],
     "It's something I'd prefer not to dwell on.":                                  [5, 1],
+    "It's a warm and cuddly blanket that brings me joy.":                          [6, 2],
 
     // Q6 — What's the most appealing thing about a wild animal?
     "Their single-minded focus and unwavering determination.":                     [1, 4],
@@ -73,29 +74,30 @@ const ANSWER_NUMEROLOGY = {
 
     // Q7 — What would be the most difficult challenge to face?
     "Being unable to speak or communicate effectively.":                           [3, 2],
-    "Having to follow rules and traditions you don't believe in.":                 [5, 1],
-    "Living a life where your talents are never fully used.":                      [1, 4],
+    "Having to follow rules and traditions i don't believe in.":                   [5, 1],
+    "Living a life where my talents are never fully used.":                        [1, 4],
     "Being forced to live a quiet life without adventure.":                        [5, 3],
-    "Watching those under your protection suffer because of your failures.":       [8, 6],
+    "Watching those under my protection suffer because of my failures.":           [8, 6],
 
     // Q8 — Imagine a world full of secrets. What would you do with them?
     "Use them to gain power and influence.":                                       [8, 1],
     "Share them only with those who are worthy.":                                  [8, 7],
     "Keep them to yourself, as they are your burden alone.":                       [7, 4],
     "Expose the most harmful ones for the good of all.":                           [9, 6],
+    "Tell anyone who comes along, because I love to gossip.":                      [3, 5],
 
     // Q9 — What does 'home' mean to you?
-    "A place you built with your own hands.":                                      [4, 1],
-    "A place you are trying to get back to.":                                      [6, 2],
-    "A place you are trying to escape.":                                           [5, 1],
-    "Wherever the people I love are gathered around a table.":                     [6, 3],
-    "Wherever the people I am responsible for are safe.":                          [8, 6],
+    "A place I built with my own hands.":                                          [4, 1],
+    "A place I am trying to get back to.":                                         [6, 2],
+    "A place I am trying to escape.":                                              [5, 1],
+    "A place where the people I love are gathered around a table.":                [6, 3],
+    "A place Where the people I am responsible for are safe.":                     [8, 6],
 
     // Q10 — Which of these describes your deepest fear?
-    "Losing control of yourself or your circumstances.":                           [8, 1],
+    "Losing control of myself or my circumstances.":                               [8, 1],
     "Being misunderstood and never truly seen.":                                   [2, 7],
-    "Being abandoned by those you trust.":                                         [2, 6],
-    "Failing to fulfill your destiny.":                                            [9, 4],
+    "Being abandoned by those I trust.":                                           [2, 6],
+    "Failing to fulfill my destiny.":                                              [9, 4],
     "Being trapped in a life of repetitive, soul-crushing routine.":               [5, 3],
 
     // Q11 — What is your greatest strength?
@@ -106,10 +108,11 @@ const ANSWER_NUMEROLOGY = {
     "My adaptability and willingness to take a leap of faith.":                    [5, 9],
 
     // Q12 — You're at a crossroads. Do you choose the path of...
-    "...the most challenging path, the one that promises the most growth.":        [1, 9],
+    "...the one that is most challenging and promises the most growth.":            [1, 9],
     "...the one that leads to the most fame and recognition.":                     [8, 3],
     "...the one that is completely new and promises the most adventure.":          [5, 3],
     "...the one where I can protect those I love.":                                [6, 2],
+    "...the one I always taken, because familiarity brings me comfort.":           [4, 6],
 
     // Q13 — When things go completely wrong, what is your first instinct?
     "Take charge immediately and give everyone a task.":                           [8, 1],

@@ -2527,6 +2527,47 @@ h1.character-detail-name {
     margin-bottom: 0;
 }
 
+/* Clickable card interaction */
+.species-subspecies-card--clickable {
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.species-subspecies-card--clickable:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    transform: translateY(-2px);
+}
+
+.species-subspecies-card--clickable:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.dark-mode .species-subspecies-card--clickable:focus-visible {
+    outline-color: #FFD700;
+}
+
+/* "Read more" prompt inside truncated card */
+.species-subspecies-card-more {
+    padding: 0 16px 12px;
+    font-family: var(--font-serif);
+    font-size: 0.85rem;
+    color: var(--primary-color);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: rgba(69,35,69,0.35);
+    transition: opacity 0.2s ease;
+}
+
+.species-subspecies-card--clickable:hover .species-subspecies-card-more {
+    opacity: 0.75;
+}
+
+.dark-mode .species-subspecies-card-more {
+    color: #FFD700;
+    text-decoration-color: rgba(255,215,0,0.4);
+}
+
 /* Narrow screens: stack vertically */
 @media (max-width: 600px) {
     .species-subspecies-grid {
