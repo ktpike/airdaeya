@@ -4526,8 +4526,30 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
 
         // ── Details info box ─────────────────────────────────────────────────
         const infoRows = [];
-        if (data.homeworld) infoRows.push({ label: 'World', html: escHtml(worldMap[data.homeworld] || data.homeworld) });
-        if (data.s_form)    infoRows.push({ label: 'Form',  html: escHtml(data.s_form) });
+        if (data.homeworld)                  infoRows.push({ label: 'World',                   html: escHtml(worldMap[data.homeworld] || data.homeworld) });
+        if (data.s_status)                   infoRows.push({ label: 'Status',                   html: escHtml(data.s_status) });
+        if (data.s_last_record)              infoRows.push({ label: 'Last recorded sighting',   html: escHtml(data.s_last_record) });
+        if (data.s_recorded_by)              infoRows.push({ label: 'Recorded by',              html: escHtml(data.s_recorded_by) });
+        if (data.s_last_recorded_location)   infoRows.push({ label: 'Last recorded location',   html: escHtml(data.s_last_recorded_location) });
+        if (data.s_form)                     infoRows.push({ label: 'Form',                     html: escHtml(data.s_form) });
+        if (data.s_lifespan)       infoRows.push({ label: 'Lifespan',      html: escHtml(data.s_lifespan) + ' years' + (data.s_lifespan_note ? ' <em>(' + escHtml(data.s_lifespan_note) + ')</em>' : '') });
+        else if (data.s_lifespan_note) infoRows.push({ label: 'Lifespan',  html: '<em>' + escHtml(data.s_lifespan_note) + '</em>' });
+        if (data.s_maturity_age)   infoRows.push({ label: 'Age of Maturity', html: escHtml(data.s_maturity_age) + ' years' });
+        else if (data.s_maturity_note) infoRows.push({ label: 'Age of Maturity', html: '<em>' + escHtml(data.s_maturity_note) + '</em>' });
+        if (data.s_gestation)      infoRows.push({ label: 'Gestation',     html: escHtml(data.s_gestation) + ' days' });
+        if (data.s_litter_min != null && data.s_litter_max != null) infoRows.push({ label: 'Litter Size', html: escHtml(data.s_litter_min) + '–' + escHtml(data.s_litter_max) + ' per litter' });
+        if (data.s_repro_interval) infoRows.push({ label: 'Min. years between clutches', html: escHtml(data.s_repro_interval) + ' years' });
+        else if (data.s_repro_note)    infoRows.push({ label: 'Repro. Interval',          html: '<em>' + escHtml(data.s_repro_note) + '</em>' });
+        if (data.s_weight)         infoRows.push({ label: 'Weight',        html: escHtml(data.s_weight) + ' babas' });
+        else if (data.s_weight_note)   infoRows.push({ label: 'Weight',    html: '<em>' + escHtml(data.s_weight_note) + '</em>' });
+        if (data.s_height)         infoRows.push({ label: 'Height',        html: escHtml(data.s_height) });
+        else if (data.s_height_note)   infoRows.push({ label: 'Height',    html: '<em>' + escHtml(data.s_height_note) + '</em>' });
+        if (data.s_diet)           infoRows.push({ label: 'Diet',          html: escHtml(data.s_diet) });
+        else if (data.s_diet_note)     infoRows.push({ label: 'Diet',      html: '<em>' + escHtml(data.s_diet_note) + '</em>' });
+        if (data.s_habitat)        infoRows.push({ label: 'Habitat',       html: escHtml(data.s_habitat) });
+        else if (data.s_habitat_note)  infoRows.push({ label: 'Habitat',   html: '<em>' + escHtml(data.s_habitat_note) + '</em>' });
+        if (data.s_territory)      infoRows.push({ label: 'Territory',     html: escHtml(data.s_territory) });
+        else if (data.s_territory_note) infoRows.push({ label: 'Territory', html: '<em>' + escHtml(data.s_territory_note) + '</em>' });
 
         if (infoRows.length) {
             const infoBox = document.createElement('div');
@@ -4622,6 +4644,16 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
 // 17b. Subspecies Detail Page
 // =================================================================================
 
+// Converts a decimal foot value (e.g. 5.489) to "5 ft 5 pinches" for display.
+// The decimal portion is tenths of a foot (pinches), not twelfths.
+// Raw decimal is preserved in Firestore for any future calculations.
+function feetAndPinches(decimalFeet) {
+    const feet    = Math.floor(decimalFeet);
+    const pinches = Math.round((decimalFeet - feet) * 10);
+    if (pinches === 0) return `${feet} ft`;
+    return `${feet} ft ${pinches} ${pinches === 1 ? 'pinch' : 'pinches'}`;
+}
+
 async function displaySubspeciesDetails(subspeciesId, fromPage, fromId) {
     const el = getContainer();
     if (!el) return;
@@ -4709,6 +4741,40 @@ async function displaySubspeciesDetails(subspeciesId, fromPage, fromId) {
             });
         }
 
+        // ── Elf subspecies fields ─────────────────────────────────────────────
+        if (ss.ss_height) infoRows.push({ label: 'Height', html: escHtml(feetAndPinches(ss.ss_height)) });
+        if (ss.ss_weight) infoRows.push({ label: 'Weight', html: escHtml(ss.ss_weight) + ' babas' });
+
+        // ── General subspecies fields ────────────────────────────────────────
+        if (ss.ss_location)           infoRows.push({ label: 'Location',           html: escHtml(ss.ss_location) });
+        if (ss.ss_weapon)             infoRows.push({ label: 'Weapon',             html: escHtml(ss.ss_weapon) });
+        if (ss.ss_magical_properties) infoRows.push({ label: 'Magical Properties', html: escHtml(ss.ss_magical_properties) });
+        if (ss.ss_notes)              infoRows.push({ label: 'Notes',              html: escHtml(ss.ss_notes) });
+
+        // ── Dragon subspecies — physical ─────────────────────────────────────
+        if (ss.ss_body_shape)    infoRows.push({ label: 'Body Shape',    html: escHtml(ss.ss_body_shape) });
+        if (ss.ss_skin_luster)   infoRows.push({ label: 'Skin Luster',   html: escHtml(ss.ss_skin_luster) });
+        if (ss.ss_scale_shape)   infoRows.push({ label: 'Scale Shape',   html: escHtml(ss.ss_scale_shape) });
+        if (ss.ss_wing_shape)    infoRows.push({ label: 'Wing Shape',    html: escHtml(ss.ss_wing_shape) });
+        if (ss.ss_luminescence)  infoRows.push({ label: 'Luminescence',  html: escHtml(ss.ss_luminescence) });
+
+        // ── Dragon subspecies — egg hatching ────────────────────────────────
+        if (ss.ss_eggs_min != null && ss.ss_eggs_max != null) infoRows.push({ label: 'Eggs per clutch', html: escHtml(ss.ss_eggs_min) + '–' + escHtml(ss.ss_eggs_max) + ' eggs per clutch' });
+        if (ss.ss_egg_condition)     infoRows.push({ label: 'Egg Condition',     html: escHtml(ss.ss_egg_condition) });
+        if (ss.ss_egg_location)      infoRows.push({ label: 'Egg Location',      html: escHtml(ss.ss_egg_location) });
+        if (ss.ss_egg_notes)         infoRows.push({ label: 'Egg Notes',         html: escHtml(ss.ss_egg_notes) });
+        if (ss.ss_egg_vulnerability) infoRows.push({ label: 'Egg Vulnerability', html: escHtml(ss.ss_egg_vulnerability) });
+
+        // ── Primia subspecies — larval stage ────────────────────────────────
+        if (ss.ss_larval_stage)          infoRows.push({ label: 'Larval Stage',          html: escHtml(ss.ss_larval_stage) });
+        if (ss.ss_larval_activity)       infoRows.push({ label: 'Larval Activity',       html: escHtml(ss.ss_larval_activity) });
+        if (ss.ss_larval_diet)           infoRows.push({ label: 'Larval Diet',           html: escHtml(ss.ss_larval_diet) });
+        if (ss.ss_larval_vulnerability)  infoRows.push({ label: 'Larval Vulnerability',  html: escHtml(ss.ss_larval_vulnerability) });
+
+        // ── Primia subspecies — population stats ─────────────────────────────
+        if (ss.ss_gen_avg_clutches_lifetime != null) infoRows.push({ label: 'Avg Clutches (lifetime)', html: escHtml(ss.ss_gen_avg_clutches_lifetime) });
+        if (ss.ss_gen_survive_adult        != null) infoRows.push({ label: 'Survive to Adult',         html: Math.round(ss.ss_gen_survive_adult * 100) + '%' });
+
         if (infoRows.length) {
             const infoBox = document.createElement('div');
             infoBox.classList.add('character-info-box');
@@ -4739,6 +4805,36 @@ async function displaySubspeciesDetails(subspeciesId, fromPage, fromId) {
             wireDescriptionLinks(rightCol, 'subspecies', subspeciesId);
         }
 
+        // ── Gen stats box (population generator traits) ──────────────────────
+        const genStatDefs = [
+            { key: 'ss_gen_strength',     label: 'Strength'     },
+            { key: 'ss_gen_constitution', label: 'Constitution' },
+            { key: 'ss_gen_influence',    label: 'Influence'    },
+            { key: 'ss_gen_cunning',      label: 'Cunning'      },
+            { key: 'ss_gen_wisdom',       label: 'Wisdom'       },
+            { key: 'ss_gen_dexterity',    label: 'Dexterity'    },
+            { key: 'ss_gen_ac',           label: 'Resilience'   },
+            { key: 'ss_gen_aggression',   label: 'Aggression'   },
+        ];
+        // Gen Traits box hidden from public view — uncomment to restore
+        // const presentStats = genStatDefs.filter(d => ss[d.key] != null);
+        // if (presentStats.length) {
+        //     const statsBox = document.createElement('div');
+        //     statsBox.classList.add('character-info-box');
+        //     statsBox.innerHTML = `
+        //         <div class="character-info-box-header">Gen Traits</div>
+        //         <dl class="character-info-list">
+        //             ${presentStats.map(d => `
+        //                 <div class="character-info-row">
+        //                     <dt>${d.label}</dt>
+        //                     <dd>${escHtml(ss[d.key])}</dd>
+        //                 </div>
+        //             `).join('')}
+        //         </dl>
+        //     `;
+        //     rightCol.appendChild(statsBox);
+        // }
+
     } catch (err) {
         console.error('Error loading subspecies details:', err);
         el.innerHTML = `<button class="back-button" id="ss-back-btn">${backLabel}</button><h2>Error loading subspecies. Please try again.</h2>`;
@@ -4757,6 +4853,7 @@ function renderFooter() {
     footer.innerHTML = `
         <div class="footer-logo-wrap" id="footer-logo-wrap"></div>
         <span class="footer-copyright">© 2026 K.T. Pike</span>
+        <a class="footer-about-link" href="https://skuulfirepress.com/about/legal/" target="_blank" rel="noopener">Terms &amp; Conditions</a>
         <button class="footer-about-link" id="footer-about-btn">About</button>
     `;
     document.body.appendChild(footer);

@@ -402,6 +402,11 @@
             opacity: 0.6;
             font-size: 0.85em;
         }
+        .field-value.note {
+            font-style: italic;
+            color: var(--text-secondary);
+            font-size: 0.85em;
+        }
 
         /* ── Completeness bar ── */
         .completeness-wrap {
@@ -720,30 +725,31 @@
     let allSpecies    = [];
     let allSubspecies = {}; // keyed by species_id
     let allJurva      = {}; // keyed by ss_id
+    let charNameCache = {}; // id → display name, loaded on demand
     let selectedId    = null;
     let currentTab    = 'traits';
 
     // Fields we care about for population modeling — label : firestore_key
     const TRAIT_FIELDS = [
-        { label: 'Umanid form',           key: 's_umanid_id' },
-        { label: 'Primal form',           key: 's_primal_id' },
-        { label: 'Shape (primal)',        key: 's_shape' },
-        { label: 'Lifespan',             key: 's_lifespan' },
-        { label: 'Age of maturity',      key: 's_maturity_age' },
-        { label: 'Gestation',            key: 's_gestation' },
-        { label: 'Litter / clutch size', key: 's_litter_size' },
-        { label: 'Repro. interval',      key: 's_repro_interval' },
-        { label: 'Weight',               key: 's_weight' },
-        { label: 'Height',               key: 's_height' },
-        { label: 'Diet',                 key: 's_diet' },
-        { label: 'Aggression',           key: 's_aggression' },
-        { label: 'Habitat',              key: 's_habitat' },
-        { label: 'Territory size',       key: 's_territory' },
-        { label: 'Resource needs (primal)', key: 's_resource_primal' },
-        { label: 'Resource needs (umanid)', key: 's_resource_umanid' },
-        { label: 'Marked',               key: 's_marked' },
-        { label: 'Form',                 key: 's_form' },
-        { label: 'Homeworld',            key: 'homeworld' },
+        { label: 'Umanid form',          key: 's_umanid_id',      hideIfForm: 'Umanid' },
+        { label: 'Primal form',          key: 's_primal_id',      hideIfForm: 'Primal' },
+        { label: 'Shape (primal)',       key: 's_shape',          hideIfForm: 'Umanid' },
+        { label: 'Lifespan',            key: 's_lifespan' },
+        { label: 'Age of maturity',     key: 's_maturity_age' },
+        { label: 'Gestation',           key: 's_gestation' },
+        { label: 'Litter / clutch size',key: 's_litter_min' },
+        { label: 'Repro. interval',     key: 's_gen_years_between_litters' },
+        { label: 'Weight',              key: 's_weight' },
+        { label: 'Height',              key: 's_height' },
+        { label: 'Diet',                key: 's_diet' },
+        { label: 'Aggression',          key: 's_aggression' },
+        { label: 'Habitat',             key: 's_habitat' },
+        { label: 'Territory size',      key: 's_territory' },
+        { label: 'Resource needs',      key: 's_resource_primal', hideIfForm: 'Umanid' },
+        { label: 'Resource needs',      key: 's_resource_umanid', hideIfForm: 'Primal' },
+        { label: 'Marked',              key: 's_marked' },
+        { label: 'Form',               key: 's_form' },
+        { label: 'Homeworld',          key: 'homeworld' },
     ];
 
     // Dragon-color name → CSS color (best approximation)
@@ -813,7 +819,10 @@
             // jurva_tetus uses ss_id field
             allJurva[speciesId] = snap.docs
                 .map(d => ({ id: d.id, ...d.data() }))
-                .filter(j => ssIds.has(j.ss_id));
+                .filter(j => {
+                    const ids = Array.isArray(j.ss_id) ? j.ss_id : [j.ss_id];
+                    return ids.some(id => ssIds.has(id));
+                });
         } catch(e) {
             allJurva[speciesId] = [];
         }
@@ -891,13 +900,13 @@
         renderCurrentTab();
     }
 
-    function renderCurrentTab() {
+    async function renderCurrentTab() {
         if (!selectedId) return;
         const species = allSpecies.find(s => s.id === selectedId);
         if (!species) return;
         if (currentTab === 'traits')     renderTraits(species);
         else if (currentTab === 'subspecies') renderSubspecies(selectedId, species);
-        else if (currentTab === 'marks')      renderMarks(selectedId, species);
+        else if (currentTab === 'marks')      await renderMarks(selectedId, species);
         else if (currentTab === 'raw')        renderRaw(species);
     }
 
@@ -906,8 +915,17 @@
     // =============================================================================
     function renderTraits(species) {
         const panel = document.getElementById('tab-traits');
-        const filled = TRAIT_FIELDS.filter(f => species[f.key] !== undefined && species[f.key] !== '').length;
-        const total  = TRAIT_FIELDS.length;
+        const applicableFields = TRAIT_FIELDS.filter(f =>
+            !(f.hideIfForm && (species.s_form || '') === f.hideIfForm)
+        );
+        const filled = applicableFields.filter(f => {
+            const val = species[f.key];
+            if (val !== undefined && val !== '') return true;
+            const note = species[f.key + '_note'];
+            return note !== undefined && note !== '';
+        }).length;
+        const total  = applicableFields.length;
+
         const pct    = Math.round(filled / total * 100);
         const fillClass = pct >= 80 ? 'full' : pct >= 40 ? 'mid' : '';
 
@@ -922,13 +940,24 @@
         </div>
         <div class="fields-grid">`;
 
-        for (const {label, key} of TRAIT_FIELDS) {
+        for (const {label, key, hideIfForm} of TRAIT_FIELDS) {
+            if (hideIfForm && (species.s_form || '') === hideIfForm) continue;
             let val = species[key];
+            // For litter/clutch size, combine min and max into a range
+            if (key === 's_litter_min' && val !== undefined) {
+                const max = species['s_litter_max'];
+                val = max !== undefined && max !== val ? `${val}–${max}` : `${val}`;
+            }
             if (Array.isArray(val)) val = val.join(', ');
-            const isEmpty = val === undefined || val === null || val === '';
+            let isEmpty = val === undefined || val === null || val === '';
+            let isNote = false;
+            if (isEmpty) {
+                const note = species[key + '_note'];
+                if (note) { val = note; isEmpty = false; isNote = true; }
+            }
             html += `<div class="field-row">
                 <div class="field-label">${label}</div>
-                <div class="field-value${isEmpty ? ' missing' : ''}">${isEmpty ? 'not yet added' : val}</div>
+                <div class="field-value${isEmpty ? ' missing' : ''}${isNote ? ' note' : ''}">${isEmpty ? 'not yet added' : val}</div>
             </div>`;
         }
 
@@ -998,7 +1027,28 @@
     // =============================================================================
     // 12. Marks tab
     // =============================================================================
-    function renderMarks(id, species) {
+    async function resolveCharNames(ids) {
+        const toFetch = ids.filter(id => id && !(id in charNameCache));
+        if (toFetch.length) {
+            await Promise.all(toFetch.map(async cid => {
+                try {
+                    // first_cj IDs use d_ prefix (deities) or c_ prefix (characters)
+                    const collection = cid.startsWith('d_') ? 'deities' : 'characters';
+                    const doc = await db.collection(collection).doc(cid).get();
+                    if (doc.exists) {
+                        const d = doc.data();
+                        charNameCache[cid] = d.deity_name || d.goes_by || d.name || cid;
+                    } else {
+                        charNameCache[cid] = cid;
+                    }
+                } catch(e) {
+                    charNameCache[cid] = cid;
+                }
+            }));
+        }
+    }
+
+    async function renderMarks(id, species) {
         const panel = document.getElementById('tab-marks');
         const jurva = allJurva[id] || [];
 
@@ -1012,15 +1062,20 @@
             return;
         }
 
+        // Resolve all first_cj character IDs before rendering
+        const carrierIds = jurva.map(j => j.first_cj).filter(Boolean);
+        await resolveCharNames(carrierIds);
+
         const mat = jurva.filter(j => j['j_type'] === 'mat');
         const pit = jurva.filter(j => j['j_type'] === 'pit');
 
         function renderMarkCards(marks, type) {
             if (!marks.length) return `<div class="mark-card-body" style="padding:12px;font-style:italic;font-size:0.85em;color:var(--text-secondary);">None recorded</div>`;
             return marks.map(m => {
-                // Find linked subspecies name
-                const linkedSs = (allSubspecies[id] || []).find(ss => ss.id === m.ss_id);
-                const ssName = linkedSs ? (linkedSs.ss_name || m.ss_id) : (m.ss_id || '—');
+                const ssIds = Array.isArray(m.ss_id) ? m.ss_id : [m.ss_id];
+                const linkedSs = (allSubspecies[id] || []).find(ss => ssIds.includes(ss.id));
+                const ssName = linkedSs ? (linkedSs.ss_name || ssIds[0]) : (ssIds.join(', ') || '—');
+                const carrierName = m.first_cj ? (charNameCache[m.first_cj] || m.first_cj) : null;
                 return `<div class="mark-row">
                     <span class="mark-key">Subspecies</span>
                     <span class="mark-val">${ssName}</span>
@@ -1033,7 +1088,7 @@
                     <span class="mark-key">Shape</span>
                     <span class="mark-val"><span class="shape-badge">${m.j_shape || '—'}</span></span>
                 </div>
-                ${m.first_cj ? `<div class="mark-row"><span class="mark-key">First carrier</span><span class="mark-val">${m.first_cj}</span></div>` : ''}
+                ${carrierName ? `<div class="mark-row"><span class="mark-key">First carrier</span><span class="mark-val">${carrierName}</span></div>` : ''}
                 <hr style="border:none;border-top:1px solid rgba(69,35,69,0.08);margin:4px 0;">`;
             }).join('');
         }
