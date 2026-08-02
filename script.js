@@ -296,7 +296,7 @@ function displayHomeScreen() {
             <button id="view-characters-btn" class="action-button">Character List</button>
             <button id="view-species-btn"    class="action-button">Species</button>
             <button id="view-calendar-btn"   class="action-button">Calendar Converter</button>
-            <button id="start-quiz-btn"      class="action-button">Personality Quiz</button>
+            <button id="start-quiz-btn"      class="action-button" style="display:none">Personality Quiz</button>
             <button id="view-map-btn"        class="action-button">World Map</button>
             <button id="view-moon-btn"       class="action-button">Moon Tracker</button>
         </div></div>
@@ -726,34 +726,31 @@ function appendCharacterCard(container, charData, released = true) {
     item.dataset.characterId = charData.id;
     item.addEventListener('click', () => displayCharacterDetails(charData.id));
 
-    const img = document.createElement('img');
-    img.alt = `Portrait of ${charData.name}`;
-    img.classList.add('character-list-portrait');
-    img.src = PLACEHOLDER_IMG;
-
-    // Always attempt to load the portrait for any visible character
+    // Only show portrait frame when a portrait path exists
     const portraitPath = resolvePortraitPath(charData.portrait);
     if (portraitPath) {
+        const img = document.createElement('img');
+        img.alt = `Portrait of ${charData.name}`;
+        img.classList.add('character-list-portrait');
+        img.src = PLACEHOLDER_IMG;
         getStorageURL(portraitPath).then(url => {
             if (url) { img.src = url; return; }
-            // Portrait file not found — use the Firebase hooded traveler placeholder
-            getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => {
-                if (ph) img.src = ph;
-            });
+            img.remove();
         });
-    } else {
-        getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => {
-            if (ph) img.src = ph;
-        });
+        item.appendChild(img);
     }
-
-    item.appendChild(img);
 
     const text = document.createElement('div');
     text.classList.add('character-list-text');
+    text.style.width = '100%';
+    text.style.flex = '1';
+    text.style.boxSizing = 'border-box';
 
     const nameEl = document.createElement('h3');
     nameEl.textContent = charData.name;
+    nameEl.style.textAlign = 'center';
+    nameEl.style.width = '100%';
+    nameEl.style.boxSizing = 'border-box';
 
     const rawDesc = charData.description || '';
     const plainDesc = rawDesc
@@ -763,8 +760,6 @@ function appendCharacterCard(container, charData, released = true) {
     const descEl = document.createElement('p');
     if (plainDesc.trim()) {
         descEl.textContent = plainDesc.length > 150 ? plainDesc.substring(0, 150) + '...' : plainDesc;
-    } else {
-        nameEl.style.textAlign = 'center';
     }
 
     text.appendChild(nameEl);
@@ -1332,23 +1327,20 @@ async function displayCharacterDetails(characterId, fromPage, fromId) {
         `;
         document.getElementById('back-to-list-btn').addEventListener('click', handleBack);
 
-        // ── Portrait ────────────────────────────────────────────────────────
+        // ── Portrait (only shown when a portrait path resolves) ──────────────
         const wrapper = el.querySelector('.character-detail-left');
-        const img = document.createElement('img');
-        img.alt = `Portrait of ${data.name}`;
-        img.classList.add('character-portrait-detail');
-        img.src = PLACEHOLDER_IMG_LARGE;
-        wrapper.appendChild(img);
-
         console.log("Character data fields:", Object.keys(data), "portrait:", data.portrait);
         const portraitPath = resolvePortraitPath(data.drakkaen_portrait || data.portrait);
         if (portraitPath) {
+            const img = document.createElement('img');
+            img.alt = `Portrait of ${data.name}`;
+            img.classList.add('character-portrait-detail');
+            img.src = PLACEHOLDER_IMG_LARGE;
+            wrapper.appendChild(img);
             getStorageURL(portraitPath).then(url => {
                 if (url) { img.src = url; return; }
-                getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => { if (ph) img.src = ph; });
+                img.remove();
             });
-        } else {
-            getStorageURL('Characters/placeholder_hooded_traveler.png').then(ph => { if (ph) img.src = ph; });
         }
 
         // ── Info box ────────────────────────────────────────────────────────
@@ -3800,73 +3792,83 @@ async function displayWorldMap() {
         // ── Wait for image to load so dimensions are known ──────────────────
         await new Promise(res => {
             if (baseImg.complete) { res(); return; }
-            baseImg.onload = res;
+            baseImg.onload  = res;
+            baseImg.onerror = res;
         });
 
         // ── Load and render each continent's SVG overlay ────────────────────
         for (const continent of visibleContinents) {
             if (!continent.svg_overlay_path) continue;
-            const svgURL = await getStorageURL(continent.svg_overlay_path);
-            if (!svgURL) continue;
+            try {
+                // SVG overlays must be same-origin (CORS blocks Firebase Storage fetch).
+                // svg_overlay_path should be a root-relative path e.g. "/kish_overlay.svg"
+                // If it still looks like a Storage path, derive the filename and fetch from hosting root.
+                let svgFetchPath = continent.svg_overlay_path;
+                if (svgFetchPath.includes('/') && !svgFetchPath.startsWith('/')) {
+                    // e.g. "Maps/kish_overlay.svg" → "/kish_overlay.svg"
+                    svgFetchPath = '/' + svgFetchPath.split('/').pop();
+                }
+                const response = await fetch(svgFetchPath);
+                const svgText  = await response.text();
 
-            const response = await fetch(svgURL);
-            const svgText  = await response.text();
+                // Parse the SVG text into a DOM element
+                const parser  = new DOMParser();
+                const svgDoc  = parser.parseFromString(svgText, 'image/svg+xml');
+                const svgEl   = svgDoc.querySelector('svg');
+                if (!svgEl) continue;
 
-            // Parse the SVG text into a DOM element
-            const parser  = new DOMParser();
-            const svgDoc  = parser.parseFromString(svgText, 'image/svg+xml');
-            const svgEl   = svgDoc.querySelector('svg');
-            if (!svgEl) continue;
+                // Make the SVG fill the overlay container exactly
+                svgEl.setAttribute('width',  '100%');
+                svgEl.setAttribute('height', '100%');
+                svgEl.style.position = 'absolute';
+                svgEl.style.top      = '0';
+                svgEl.style.left     = '0';
 
-            // Make the SVG fill the overlay container exactly
-            svgEl.setAttribute('width',  '100%');
-            svgEl.setAttribute('height', '100%');
-            svgEl.style.position = 'absolute';
-            svgEl.style.top      = '0';
-            svgEl.style.left     = '0';
+                // ── Wire up each country path ────────────────────────────────────
+                const paths = svgEl.querySelectorAll('path, polygon, ellipse, circle, rect');
+                paths.forEach(path => {
+                    const countryId = path.getAttribute('id');
+                    const country   = allCountries[countryId];
+                    if (!country) return;
 
-            // ── Wire up each country path ────────────────────────────────────
-            const paths = svgEl.querySelectorAll('path, polygon, ellipse, circle, rect');
-            paths.forEach(path => {
-                const countryId = path.getAttribute('id');
-                const country   = allCountries[countryId];
-                if (!country) return;
+                    // Base styles — invisible but interactive
+                    path.style.fill            = 'transparent';
+                    path.style.stroke          = 'none';
+                    path.style.cursor          = 'pointer';
+                    path.style.transition      = 'fill 0.2s ease';
 
-                // Base styles — invisible but interactive
-                path.style.fill            = 'transparent';
-                path.style.stroke          = 'none';
-                path.style.cursor          = 'pointer';
-                path.style.transition      = 'fill 0.2s ease';
+                    // Hover — gold highlight
+                    path.addEventListener('mouseenter', (e) => {
+                        path.style.fill    = 'rgba(255, 215, 0, 0.35)';
+                        path.style.stroke  = '#FFD700';
+                        path.style.strokeWidth = '2';
+                        tooltip.textContent    = country.ctry_name || countryId;
+                        tooltip.style.display  = 'block';
+                    });
 
-                // Hover — gold highlight
-                path.addEventListener('mouseenter', (e) => {
-                    path.style.fill    = 'rgba(255, 215, 0, 0.35)';
-                    path.style.stroke  = '#FFD700';
-                    path.style.strokeWidth = '2';
-                    tooltip.textContent    = country.ctry_name || countryId;
-                    tooltip.style.display  = 'block';
+                    path.addEventListener('mousemove', (e) => {
+                        const wrapper = document.getElementById('map-wrapper');
+                        const rect    = wrapper.getBoundingClientRect();
+                        tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+                        tooltip.style.top  = (e.clientY - rect.top  - 28) + 'px';
+                    });
+
+                    path.addEventListener('mouseleave', () => {
+                        path.style.fill       = 'transparent';
+                        path.style.stroke     = 'none';
+                        tooltip.style.display = 'none';
+                    });
+
+                    // Click → country detail page
+                    path.addEventListener('click', () => {
+                        displayCountryDetails(countryId);
+                    });
                 });
 
-                path.addEventListener('mousemove', (e) => {
-                    const wrapper = document.getElementById('map-wrapper');
-                    const rect    = wrapper.getBoundingClientRect();
-                    tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
-                    tooltip.style.top  = (e.clientY - rect.top  - 28) + 'px';
-                });
-
-                path.addEventListener('mouseleave', () => {
-                    path.style.fill       = 'transparent';
-                    path.style.stroke     = 'none';
-                    tooltip.style.display = 'none';
-                });
-
-                // Click → country detail page
-                path.addEventListener('click', () => {
-                    displayCountryDetails(countryId);
-                });
-            });
-
-            overlayContainer.appendChild(svgEl);
+                overlayContainer.appendChild(svgEl);
+            } catch (svgErr) {
+                console.warn(`Could not load SVG overlay for continent ${continent.id}:`, svgErr);
+            }
         }
 
         // ── Load and render city pins ────────────────────────────────────────
@@ -3895,7 +3897,7 @@ async function displayWorldMap() {
             pin.appendChild(dot);
             pin.appendChild(label);
 
-            if (city.city_desc) {
+            if (city.city_desc && city.city_desc.trim()) {
                 pin.style.cursor = 'pointer';
                 pin.addEventListener('click', () => {
                     displayCityDetails(doc.id);
@@ -4350,7 +4352,7 @@ async function displaySpeciesList() {
         const speciesList = [];
         snap.forEach(d => {
             const data = { id: d.id, ...d.data() };
-            if (data.reveal === true) speciesList.push(data);
+            if (data.reveal === true && data.sp_description) speciesList.push(data);
         });
         speciesList.sort((a, b) => (a.s_name || '').localeCompare(b.s_name || ''));
 
@@ -4387,25 +4389,17 @@ async function displaySpeciesList() {
                 ? escHtml(stripHtml(species.sp_description.replace(/\[\[[^\]]+\|([^\]]+)\]\]/g, '$1')).slice(0, 120)) + (stripHtml(species.sp_description).length > 120 ? '…' : '')
                 : '';
 
-            // Portrait image — mirrors character card pattern
-            const img = document.createElement('img');
-            img.alt = `Image of ${species.s_name || species.id}`;
-            img.classList.add('character-list-portrait');
-            img.src = PLACEHOLDER_IMG;
-
-            const speciesListPlaceholder = (species.s_form || '').toLowerCase() === 'umanid'
-                ? 'Species/placeholder_umanid.png'
-                : 'Species/placeholder_creature.png';
-
+            // Only show image frame when s_image is set
             if (species.s_image) {
+                const img = document.createElement('img');
+                img.alt = `Image of ${species.s_name || species.id}`;
+                img.classList.add('character-list-portrait');
+                img.src = PLACEHOLDER_IMG;
                 getStorageURL(species.s_image)
-                    .then(url => { if (url) img.src = url; })
-                    .catch(() => getStorageURL(speciesListPlaceholder).then(ph => { if (ph) img.src = ph; }));
-            } else {
-                getStorageURL(speciesListPlaceholder).then(ph => { if (ph) img.src = ph; });
+                    .then(url => { if (url) img.src = url; else img.remove(); })
+                    .catch(() => img.remove());
+                item.appendChild(img);
             }
-
-            item.appendChild(img);
 
             const textDiv = document.createElement('div');
             textDiv.classList.add('species-list-text');
@@ -4504,24 +4498,16 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
         const rightCol = document.getElementById('sp-right');
         const ssSection = document.getElementById('sp-subspecies');
 
-        // ── Image (async, placeholder while loading) ─────────────────────────
-        const img = document.createElement('img');
-        img.alt = `Image of ${data.s_name}`;
-        img.classList.add('character-portrait-detail');
-        img.src = PLACEHOLDER_IMG_LARGE;
-        leftCol.appendChild(img);
-
-        const speciesPlaceholderPath = (data.s_form || '').toLowerCase() === 'umanid'
-            ? 'Species/placeholder_umanid.png'
-            : 'Species/placeholder_creature.png';
-
+        // ── Image (only shown when s_image is set) ───────────────────────────
         if (data.s_image) {
-            // Load real image; fall back to form-based placeholder on failure
+            const img = document.createElement('img');
+            img.alt = `Image of ${data.s_name}`;
+            img.classList.add('character-portrait-detail');
+            img.src = PLACEHOLDER_IMG_LARGE;
+            leftCol.appendChild(img);
             getStorageURL(data.s_image)
-                .then(url => { if (url) img.src = url; })
-                .catch(() => getStorageURL(speciesPlaceholderPath).then(ph => { if (ph) img.src = ph; }));
-        } else {
-            getStorageURL(speciesPlaceholderPath).then(ph => { if (ph) img.src = ph; });
+                .then(url => { if (url) img.src = url; else img.remove(); })
+                .catch(() => img.remove());
         }
 
         // ── Details info box ─────────────────────────────────────────────────
@@ -4589,27 +4575,20 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
                 card.addEventListener('click', () => displaySubspeciesDetails(ss.id, 'species', speciesId));
                 card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') displaySubspeciesDetails(ss.id, 'species', speciesId); });
 
-                // Image element (async load, form-based placeholder while waiting)
-                const img = document.createElement('img');
-                img.alt = `Image of ${ss.ss_name || ss.id}`;
-                img.classList.add('species-subspecies-card-img');
-                img.src = PLACEHOLDER_IMG_LARGE;
-
-                const ssPlaceholderPath = (data.s_form || '').toLowerCase() === 'umanid'
-                    ? 'Species/placeholder_umanid.png'
-                    : 'Species/placeholder_creature.png';
-
+                // Image wrap (only shown when ss_image is set)
+                let imgWrap = null;
                 if (ss.ss_image) {
+                    const img = document.createElement('img');
+                    img.alt = `Image of ${ss.ss_name || ss.id}`;
+                    img.classList.add('species-subspecies-card-img');
+                    img.src = PLACEHOLDER_IMG_LARGE;
                     getStorageURL(ss.ss_image)
-                        .then(url => { if (url) img.src = url; })
-                        .catch(() => getStorageURL(ssPlaceholderPath).then(ph => { if (ph) img.src = ph; }));
-                } else {
-                    getStorageURL(ssPlaceholderPath).then(ph => { if (ph) img.src = ph; });
+                        .then(url => { if (url) img.src = url; else img.remove(); })
+                        .catch(() => img.remove());
+                    imgWrap = document.createElement('div');
+                    imgWrap.classList.add('species-subspecies-card-img-wrap');
+                    imgWrap.appendChild(img);
                 }
-
-                const imgWrap = document.createElement('div');
-                imgWrap.classList.add('species-subspecies-card-img-wrap');
-                imgWrap.appendChild(img);
 
                 // Strip HTML for plain-text preview (no raw HTML in card body)
                 const tempDiv = document.createElement('div');
@@ -4627,7 +4606,7 @@ async function displaySpeciesDetails(speciesId, fromPage, fromId) {
                     ${plainText.length > 180 ? '<div class="species-subspecies-card-more">Read more \u2192</div>' : ''}
                 `;
 
-                card.appendChild(imgWrap);
+                if (imgWrap) card.appendChild(imgWrap);
                 card.appendChild(contentWrap);
                 ssGrid.appendChild(card);
             });
@@ -4717,19 +4696,16 @@ async function displaySubspeciesDetails(subspeciesId, fromPage, fromId) {
         const leftCol  = document.getElementById('ss-left');
         const rightCol = document.getElementById('ss-right');
 
-        // ── Image ─────────────────────────────────────────────────────────────
-        const img = document.createElement('img');
-        img.alt = `Image of ${ss.ss_name || subspeciesId}`;
-        img.classList.add('character-portrait-detail');
-        img.src = PLACEHOLDER_IMG_LARGE;
-        leftCol.appendChild(img);
-
+        // ── Image (only shown when ss_image is set) ──────────────────────────
         if (ss.ss_image) {
+            const img = document.createElement('img');
+            img.alt = `Image of ${ss.ss_name || subspeciesId}`;
+            img.classList.add('character-portrait-detail');
+            img.src = PLACEHOLDER_IMG_LARGE;
+            leftCol.appendChild(img);
             getStorageURL(ss.ss_image)
-                .then(url => { if (url) img.src = url; })
-                .catch(() => getStorageURL(placeholderPath).then(ph => { if (ph) img.src = ph; }));
-        } else {
-            getStorageURL(placeholderPath).then(ph => { if (ph) img.src = ph; });
+                .then(url => { if (url) img.src = url; else img.remove(); })
+                .catch(() => img.remove());
         }
 
         // ── Details info box ─────────────────────────────────────────────────
@@ -4880,8 +4856,7 @@ function showAboutModal() {
         <div id="about-modal">
             <div class="about-modal-header">About Airdaeium</div>
             <div class="about-modal-body">
-                <p><strong>Airdaeium</strong> is a reader companion for the <em>Tales of Airdaeya</em> fantasy series by K.T. Pike. Explore character profiles, convert dates on the Oram calendar, and discover which Airdaeya character matches your personality.</p>
-                <p>The personality quiz is for entertainment purposes only. Results are written in the stars — and by Google Gemini AI — based on your answers, and may vary between sessions.</p>
+                <p><strong>Airdaeium</strong> is a reader companion for the <em>Tales of Airdaeya</em> fantasy series by K.T. Pike. Explore character profiles, convert dates on the Oram calendar, and explore the various regions on the interactive map.</p>
                 <p>For more about the author and the books, visit <a href="${addAppTracking('https://ktpike.com', 'about_modal')}" target="_blank" rel="noopener">ktpike.com</a>.</p>
             </div>
             <button class="about-modal-close" id="about-modal-close-btn">Close</button>
